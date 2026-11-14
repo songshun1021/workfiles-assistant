@@ -1,5 +1,23 @@
 # 资料账本与桌面语音升级验收记录
 
+## 0.5.3 “打开它所在的文件夹”改为按候选在访达中显示，2026-11-15（Asia/Shanghai）
+
+用户测试“打开这份文件对应的文件夹”，助手回答“只支持打开文件或网页”。排查结论：**不是模型没能力，而是工具面确实没有这个动作**——`workfiles_open` 只接受 `candidateId`，桌面语音会话又只有 5 个工具，没有 shell 可以拼 `open`。这是产品缺口，不是 API 问题。
+
+### 最小改动
+
+- `workfiles_open` 新增可选参数 `revealInFinder`（默认 false）。为 true 时走 `lib/documents.js` 新增的 `reveal()`：**复用与打开完全相同的 `validate()`**（范围 + 身份 + mtime/bytes/version 复核），再执行 `/usr/bin/open -R <校验后的路径>`。仍然**只有 5 个工具**，仍然**没有任何 path/folder 参数**。
+- 网页线索（`wa-`）遇到 `revealInFinder` 直接拒绝（`REVEAL_UNAVAILABLE`），因为网页没有本机文件夹。
+- 系统提示补充：这类请求应当用 `revealInFinder: true`，**不要回答做不到**；但依然不能打开任意文件夹或路径。
+- 语义如实：返回 `reveal_requested` 且 `finderVisibleConfirmed: false`——只代表系统接受请求，不证明访达已在前台。
+
+### 验证
+
+- 新增 3 项测试：引擎层（`open -R` 只用于校验后的候选、篡改路径不会变成“打开任意文件夹”、不经 shell）、操作层（reveal 不触发默认应用打开、工具无 path/folder 字段）、网页层（拒绝并零原生调用）。
+- 全量 **627 tests / 627 pass / 0 fail / 0 skipped**，语法检查 exit 0。版本 **0.5.3**。
+
+---
+
 ## 0.5.2 内测分发包：可移植性修正，2026-11-15（Asia/Shanghai）
 
 用户要打包给朋友的 Agent 安装。打包自检时发现**三处只在本机成立**的硬编码，会导致对方机器上构建或自检失败——属于真实缺陷，已修：

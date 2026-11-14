@@ -153,3 +153,10 @@ test('five tools stay fixed: only open accepts observed wa ID; inspect never bec
   await assert.rejects(inspect.execute({ candidateId: id }, {}), { code: 'INVALID_ARGS' });
   for (const input of [{ candidateId: 'https://example.com/doc' }, { candidateId: id + '\n' }, { candidateId: id, url: 'https://example.com/doc' }]) await assert.rejects(open.execute(input, {}), { code: 'INVALID_ARGS' });
 });
+test('revealing a web clue is refused: it has no local folder to show', async () => {
+  const h = fixture(), result = await h.call(h.A, 'history', { detail: 'documents' });
+  const id = result.data.webCandidates[0].id;
+  const revealed = await h.call(h.A, 'open', { candidateId: id, revealInFinder: true });
+  assert.equal(revealed.ok, false); assert.equal(revealed.code, 'REVEAL_UNAVAILABLE');
+  assert.equal(h.calls.native.length, 0, 'no Finder or browser request is made');
+});

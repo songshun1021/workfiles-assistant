@@ -198,3 +198,21 @@ test('query length and result bounds are enforced', async t => {
   await assert.rejects(engine.search({ limit: 21 }), { code: 'INVALID_SEARCH' });
   await assert.rejects(engine.search({ kind: 'executable' }), { code: 'INVALID_KIND' });
 });
+test('revealing a candidate selects it in Finder without ever accepting a folder path', async t => {
+  const root = await temporary(t); const name = '课题;$(touch nope) 报告.pptx';
+  await textFile(root, name);
+  const { engine, calls } = engineFor(root);
+  const candidate = (await engine.search({ query: '报告' })).candidates[0];
+  const revealed = await engine.reveal(candidate);
+  assert.equal(revealed.status, 'reveal_requested');
+  assert.equal(revealed.finderVisibleConfirmed, false);
+  assert.equal(revealed.folder, path.resolve(root));
+  // -R selects the file in its containing folder; nothing is launched and no shell is used.
+  assert.deepEqual(calls.at(-1), ['/usr/bin/open', '-R', path.join(root, name)]);
+  assert.ok(!calls.some(call => call.includes('/bin/sh') || call.includes('/bin/zsh')));
+  // The engine re-derives the target from the candidate path and re-checks identity, so a
+  // tampered path cannot turn a reveal into "open any folder".
+  const before = calls.length;
+  await assert.rejects(engine.reveal({ ...candidate, path: '/tmp' }));
+  assert.equal(calls.length, before, 'no native call for a rejected candidate');
+});

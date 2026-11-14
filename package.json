@@ -1,6 +1,6 @@
 {
   "name": "@local/deepseek-workfiles",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "Opt-in seven-day macOS app and AX window hints, controlled desktop voice, scoped document search and safe observed-link opening.",
   "type": "module",

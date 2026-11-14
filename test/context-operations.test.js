@@ -155,6 +155,26 @@ test('a canceled queued operation never reaches its body', async () => {
 test('the agent has no tool to grant folders, change policy or open arbitrary paths', () => {
   const definitions = createToolDefinitions(async () => ({}));
   assert.deepEqual(definitions.map(value => value.name), ['workfiles_search', 'workfiles_inspect', 'workfiles_open', 'workfiles_context', 'workfiles_history']);
-  assert.deepEqual(Object.keys(definitions.find(value => value.name === 'workfiles_open').parameters.properties), ['candidateId']);
+  assert.deepEqual(Object.keys(definitions.find(value => value.name === 'workfiles_open').parameters.properties), ['candidateId', 'revealInFinder']);
+  // Folder requests reuse the candidate gate: still exactly five tools, no path argument.
+  assert.equal(definitions.length, 5);
+  assert.ok(!Object.hasOwn(definitions.find(value => value.name === 'workfiles_open').parameters.properties, 'path'));
   assert.ok(WORKFILES_PROMPT.includes('不可信资料')); assert.ok(WORKFILES_PROMPT.includes('open_requested'));
+});
+test('a folder request is served by the same candidate gate, never by a path argument', async () => {
+  const h = harness(), agent = { session: { id: 'folder-session' } };
+  const search = await h.call(agent, 'search', { query: '课题' });
+  const first = search.data.candidates[0];
+  const reveals = [];
+  h.engine.reveal = async value => { reveals.push(value); return { status: 'reveal_requested', candidate: value, folder: value.folder, requestedAt: '2026-11-12T01:00:00Z', finderVisibleConfirmed: false }; };
+  const revealed = await h.call(agent, 'open', { candidateId: first.id, revealInFinder: true });
+  assert.equal(revealed.ok, true); assert.equal(revealed.data.status, 'reveal_requested');
+  assert.deepEqual(reveals.map(value => value.id), [first.id]);
+  assert.equal(h.opens.length, 0, 'revealing must not launch the default app');
+  // A web clue has no local folder, and no arbitrary path is representable at all.
+  const tools = createToolDefinitions(async () => ({}));
+  const open = tools.find(value => value.name === 'workfiles_open');
+  assert.equal(Object.hasOwn(open.parameters.properties, 'path'), false);
+  assert.equal(Object.hasOwn(open.parameters.properties, 'folder'), false);
+  assert.match(WORKFILES_PROMPT, /revealInFinder/u);
 });

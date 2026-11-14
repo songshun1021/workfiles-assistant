@@ -21,7 +21,7 @@ test('local distribution includes every runtime entry and localized original art
     assert.equal(path.dirname(resource), path.resolve(root)); assert.ok((await fs.stat(resource)).size > 0);
   }
   assert.equal(manifest.engines.dsh, '0.2.2-rc.3');
-  assert.equal(manifest.version, '0.5.2');
+  assert.equal(manifest.version, '0.5.3');
   assert.equal(typeof applyVoice, 'function');
   for (const key of ['workfiles', 'agents', 'agentDefaultModel', 'sessionController', 'speechController', 'storageDomain', 'subprocess']) assert.ok(voiceInject.includes(key), key);
   // rc.2 public storage unit names are SQL/file-safe identifier segments, not package names.
