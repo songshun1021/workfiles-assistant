@@ -70,3 +70,29 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   .primary, button:hover:not(:disabled) { border-color: Highlight; }
   button:disabled { color: GrayText; opacity: 1; }
 }
+
+/* --- feedback motion: state clarity, not decoration ------------------------- */
+:root { --voice-ease: cubic-bezier(0.22, 0.61, 0.36, 1); }
+/* The mic mark pulses only while the microphone is actually capturing. */
+main[data-activity="listening"] .voice-mark { animation: voice-pulse 1.6s var(--voice-ease) infinite; color: var(--voice-accent); }
+/* Real RMS level (already computed in audio.js) shown as a short bar that settles fast. */
+#level { transition: opacity 120ms linear; }
+main[data-activity="listening"] #level { inline-size: 96px; block-size: 7px; accent-color: var(--voice-accent); }
+/* While a task runs, drop the input affordances so the eye stays on progress. */
+main[data-activity="working"] .secondary { visibility: hidden; }
+/* Busy phases get an indeterminate "working" hint next to the caption, never fake text. */
+main[data-activity="working"] #status::after { content: "…"; animation: voice-dots 1.1s steps(3, end) infinite; }
+/* Recognised or answered text fades up once, which reads as it arriving. */
+#echo:not([hidden]), #detail:not([hidden]), #error:not([hidden]) { animation: voice-rise 140ms var(--voice-ease) both; }
+/* Confirmation flash on completion, then the window fades out from main.mjs. */
+main[data-activity="done"] .taskbar { animation: voice-settle 220ms var(--voice-ease) both; }
+@keyframes voice-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.92); } }
+@keyframes voice-dots { from { opacity: 0.35; } to { opacity: 1; } }
+@keyframes voice-rise { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+@keyframes voice-settle { from { transform: scale(0.985); } to { transform: scale(1); } }
+/* Accessibility: honour the OS setting instead of animating anyway. */
+@media (prefers-reduced-motion: reduce) {
+  main[data-activity="listening"] .voice-mark, main[data-activity="working"] #status::after,
+  #echo:not([hidden]), #detail:not([hidden]), #error:not([hidden]), main[data-activity="done"] .taskbar { animation: none; }
+  #level { transition: none; }
+}

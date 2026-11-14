@@ -53,3 +53,19 @@ export function shouldAutoDismissFeedback(state, {
   if (/[\r\n\u2028\u2029]/u.test(message)) return false;
   return Array.from(message).length <= SHORT_FEEDBACK_MAX_CHARACTERS;
 }
+
+// Window density policy: while a task is actually running the panel shrinks so the
+// user focuses on progress instead of on the full form. Pure mapping, no DOM.
+export const PANEL_SIZES = Object.freeze({ full: Object.freeze({ width: 620, height: 244 }), compact: Object.freeze({ width: 460, height: 118 }) });
+export function panelDensity(phase) {
+  return ['preparing', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
+}
+// Busy phases pulse a subtle indicator; reduced-motion users still get the text state.
+export function panelActivity(phase = 'ready', captureActive = false) {
+  if (captureActive) return 'listening';
+  if (['preparing', 'transcribing', 'working'].includes(phase)) return 'working';
+  if (phase === 'question') return 'waiting';
+  if (phase === 'done') return 'done';
+  if (phase === 'error') return 'error';
+  return 'idle';
+}

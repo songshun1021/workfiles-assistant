@@ -1,5 +1,5 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback } from './view-state.js';
+import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
@@ -434,6 +434,8 @@ function render() {
   if (ui.status.textContent !== status) ui.status.textContent = status;
   ui.status.title = status;
   panel.dataset.phase = localError ? 'error' : recording ? 'listening' : typingOpen || needsExplicitStart ? 'ready' : host.phase;
+  // Motion keyed to what is actually happening (real capture / real work), not to a guess.
+  panel.dataset.activity = localError || host.phase === 'error' ? 'error' : panelActivity(host.phase, captureActive);
   let label = '开始说话';
   if (recording) label = captureActive ? '停止提交' : '停止';
   else if (speech) label = '跳过朗读';

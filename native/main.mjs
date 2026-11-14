@@ -40,6 +40,39 @@ function send(message) {
   process.stdout.write(line);
 }
 function notice(code, message) { send({ v: 1, type: 'notice', code, message }); }
+// While a task is actually running, shrink the owned window so the user watches the
+// task, not the form. Background agents keep the full panel for questions/results.
+const PANEL_FULL = Object.freeze({ width: 620, height: 244 });
+const PANEL_COMPACT = Object.freeze({ width: 460, height: 118 });
+const COMPACT_PHASES = new Set(['preparing', 'transcribing', 'working']);
+function applyDensity(state) {
+  if (!window || window.isDestroyed() || !state?.visible) return;
+  const target = COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL;
+  try {
+    const [width, height] = window.getContentSize();
+    if (width === target.width && height === target.height) return;
+    const bounds = window.getBounds();
+    window.setBounds({ x: bounds.x, y: bounds.y, width: target.width, height: target.height }, true);
+  } catch { /* a resize is cosmetic; never fail a task over it */ }
+}
+// Short fade so a finished panel reads as "leaving" instead of vanishing.
+function fadeOutThenDestroy(activationId) {
+  const target = window;
+  if (exiting || !target || target.isDestroyed()) { destroyWindow(activationId); return; }
+  let step = 0;
+  const steps = 5;
+  const timer = setInterval(() => {
+    step += 1;
+    if (window !== target || target.isDestroyed()) { clearInterval(timer); return; }
+    try { target.setOpacity(Math.max(0, 1 - step / steps)); } catch { /* ignore */ }
+    if (step >= steps) {
+      clearInterval(timer);
+      try { target.setOpacity(1); } catch { /* ignore */ }
+      if (window === target) destroyWindow(activationId);
+    }
+  }, 28);
+  timer.unref?.();
+}
 function fatal(code, message) {
   if (exiting) return;
   try { send({ v: 1, type: 'fatal', code, message }); } finally { shutdown(1); }
@@ -50,7 +83,9 @@ function rendererState() {
   return { ...value, visible };
 }
 function publish() {
-  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(`${prefix}state`, rendererState());
+  const state = rendererState();
+  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(`${prefix}state`, state);
+  applyDensity(state);
   clearTimeout(stopTimer); stopTimer = null;
   if (controller?.isCapturing() && !controller.mayCapture()) {
     // Renderer normally acknowledges stopped tracks immediately. Destroy the
@@ -92,6 +127,7 @@ function shutdown(exitCode = 0) {
 function presentWindow(ownedWindow, activationId) {
   const state = controller.snapshot();
   if (exiting || window !== ownedWindow || ownedWindow.isDestroyed() || !state.visible || state.activationId !== activationId || revealTarget?.activationId !== activationId) return;
+  try { ownedWindow.setOpacity(1); } catch { /* ignore */ }
   if (revealTarget.focus) { ownedWindow.show(); ownedWindow.focus(); }
   else ownedWindow.showInactive();
   publish();
@@ -210,7 +246,7 @@ app.whenReady().then(async () => {
     register: (accelerator, callback) => globalShortcut.register(accelerator, () => { try { callback(); } catch (error) { reportOperationError(error); } }),
     unregister: accelerator => globalShortcut.unregister(accelerator),
     onState: publish,
-    onHide: ({ activationId }) => destroyWindow(activationId),
+    onHide: ({ activationId }) => fadeOutThenDestroy(activationId),
     onShow: options => { ensureWindow(options).catch(() => { if (!exiting && controller.snapshot().visible && controller.snapshot().activationId === options.activationId) fatal('PANEL_LOAD_FAILED', 'The real native voice panel could not be loaded.'); }); },
   });
   for (const method of ['ready', 'audio', 'text', 'action', 'capture']) {
