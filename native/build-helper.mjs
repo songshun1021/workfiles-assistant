@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -11,7 +12,7 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness';
 // This one external location was explicitly approved by the user. No arbitrary
 // --output-root, HOME-derived cache location, or fallback temporary directory.
-export const APPROVED_CACHE_ROOT = '/Users/sean/Library/Caches/DeepSeekHarness/WorkfilesVoice';
+export const APPROVED_CACHE_ROOT = path.join(os.homedir(), 'Library/Caches/DeepSeekHarness/WorkfilesVoice');
 const OWNER = 'workfiles-voice-native-v1';
 const APP_ID = 'local.workfiles.voice';
 const APP_NAME = 'Workfiles Voice Helper.app';
@@ -87,7 +88,7 @@ export function parseBuildArguments(args) {
 async function prepareOwnedOutputRoot(root, bundleRoot) {
   resolveBuildOutputRoot(bundleRoot, root);
   if (root === APPROVED_CACHE_ROOT) {
-    const cacheParent = '/Users/sean/Library/Caches';
+    const cacheParent = path.join(os.homedir(), 'Library/Caches');
     const parentStat = await fs.lstat(cacheParent);
     if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || await fs.realpath(cacheParent) !== cacheParent) throw new Error('Approved cache ancestor is not a real directory');
     const namespace = path.dirname(APPROVED_CACHE_ROOT);

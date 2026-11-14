@@ -1,5 +1,28 @@
 # 资料账本与桌面语音升级验收记录
 
+## 0.5.2 内测分发包：可移植性修正，2026-11-15（Asia/Shanghai）
+
+用户要打包给朋友的 Agent 安装。打包自检时发现**三处只在本机成立**的硬编码，会导致对方机器上构建或自检失败——属于真实缺陷，已修：
+
+| 位置 | 问题 | 处理 |
+| --- | --- | --- |
+| `native/build-helper.mjs` | 缓存根写死 `/Users/sean/Library/Caches/...`，换用户直接报「未批准的输出目录」 | 改为 `os.homedir()` 派生；批准校验仍要求精确等于该 owned 目录 |
+| `test/create_test_presentations.py` | 守卫写死开发机工作区，换目录即拒绝生成夹具 | 改为从 `__file__` 推导项目根，仍要求输出落在本项目内 |
+| `test/documents.test.js` | python3 路径写死某个 `dsh-runtimes` 目录 | 改为在 `~/.dsh/dsh-runtimes/*/dependencies/python/bin/python3` 里查找；找不到则 `t.skip` 而不是失败 |
+| `test/voice-native.test.js` | 断言写死缓存根 | 同步改为 homedir 派生断言 |
+
+同时新增 [AGENT_INSTALL.md](<./AGENT_INSTALL.md>)：面向接收方 Agent 的十步安装手册（环境自检、固定目录、`install_bundle`、`pnpm run build:native`、`node --test`、启用与只读验证、必须由人类完成的授权、禁止事项、故障排查、卸载），并明确 **cordis.patch.yml 里的默认资料文件夹是开发机路径，换机器必须替换**。
+
+### 打包与自检
+
+- 归档 `workfiles-assistant-0.5.2-beta.1.zip`，**74 个条目**（源码 + 文档 + `AGENT_INSTALL.md` + `BUNDLE.json` + `SHA256SUMS`），332 KB，无 `__MACOSX` 元数据。
+- 排除 `node_modules/`、`.native/`（每台机器自建的语音组件记录）、开发期源码备份；上传前扫过密钥特征，无凭据。
+- **把压缩包解到 `/tmp/verify2` 再从那里跑全量：624 tests / 624 pass / 0 fail / 0 skipped**，`SHA256SUMS` 逐项校验通过——证明包在「别人的路径」下自洽，不再依赖开发机目录。
+- 版本 **0.5.2**；依赖、账本 schema、RPC、原生读取与工具集均未变，仍为 624 项测试。
+- 本机 `git` 被未接受的 Xcode 许可挡住，仓库内容通过 GitHub REST git-data API 提交；**用户在此机执行 `git clone/push` 前需先 `sudo xcodebuild -license`**。
+
+---
+
 ## 0.5.1 语音会话不再停留在旧模型路由，2026-11-14（Asia/Shanghai）
 
 用户报告“让它打开最近看过的推文没有响应”，怀疑是切换 API 导致。**只读排查日志后确认：与插件、账本、网页打开都无关，是语音专用会话仍在使用旧路由。**

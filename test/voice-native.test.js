@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { parseHostMessage, parseHelperMessage, encodeMessage, createLineDecoder, MAX_LINE_BYTES, MAX_AUDIO_BYTES } from '../native/protocol.mjs';
@@ -314,7 +315,7 @@ test('main source retains strict sandbox, lazy real page, no proactive mic/AX/di
 });
 
 test('builder output root is only the project native directory or exact user-approved cache', () => {
-  assert.equal(APPROVED_CACHE_ROOT, '/Users/sean/Library/Caches/DeepSeekHarness/WorkfilesVoice');
+  assert.equal(APPROVED_CACHE_ROOT, path.join(os.homedir(), 'Library/Caches/DeepSeekHarness/WorkfilesVoice'));
   assert.equal(resolveBuildOutputRoot(root), path.join(root, '.native'));
   assert.equal(resolveBuildOutputRoot(root, '.native'), path.join(root, '.native'));
   assert.equal(resolveBuildOutputRoot(root, APPROVED_CACHE_ROOT), APPROVED_CACHE_ROOT);

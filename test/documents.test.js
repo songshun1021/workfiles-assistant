@@ -164,10 +164,24 @@ test('native adapter bounds output, excludes inherited secrets and propagates fa
   const bad = createNativeRunner({ spawn() { return { done: Promise.resolve({ exitCode: 1, signal: null }), collected: {}, terminate() {}, waitForExit: async () => true }; } });
   await assert.rejects(bad(['/usr/bin/open', '/a']), { code: 'NATIVE_COMMAND_FAILED' });
 });
+// The python-pptx fixture generator is optional: only machines with the bundled
+// DSH python runtime can build real PPTX fixtures. Never hardcode one user's path.
+async function findBundledPython() {
+  const base = path.join(os.homedir(), '.dsh', 'dsh-runtimes');
+  let entries;
+  try { entries = await fs.readdir(base); } catch { return null; }
+  for (const entry of entries) {
+    const candidate = path.join(base, entry, 'dependencies', 'python', 'bin', 'python3');
+    try { await fs.access(candidate, fs.constants.X_OK); return candidate; } catch { /* try the next runtime */ }
+  }
+  return null;
+}
 test('real python-pptx files: latest relevant selection, semantic body fallback and page inspection', async t => {
   const root = await temporary(t);
   const script = fileURLToPath(new URL('./create_test_presentations.py', import.meta.url));
-  await exec('/Users/sean/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3', [script, root], { timeout: 15000, maxBuffer: 16384 });
+  const python = await findBundledPython();
+  if (!python) { t.skip('bundled python runtime not installed on this machine'); return; }
+  await exec(python, [script, root], { timeout: 15000, maxBuffer: 16384 });
   const { engine } = engineFor(root);
   const named = await engine.search({ query: '光学课题 报告', sort: 'modified' });
   assert.equal(named.candidates[0].name, '光学课题_报告_新版.pptx');

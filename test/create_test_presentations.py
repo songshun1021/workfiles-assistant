@@ -7,9 +7,9 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 
 output = Path(sys.argv[1]).resolve()
-workspace = Path('/Users/sean/Documents/DSHarness').resolve()
-if workspace not in output.parents or 'workfiles' not in str(output):
-    raise SystemExit('Refusing to create fixtures outside the owned workspace test area')
+project_root = Path(__file__).resolve().parent.parent
+if project_root not in output.parents:
+    raise SystemExit('Refusing to create fixtures outside this project')
 output.mkdir(parents=True, exist_ok=True)
 fixtures = [
     ('光学课题_报告_旧版.pptx', '光学课题阶段报告（旧版）', '验收样例：光学测量与实验设计。', '2025-01-01T10:00:00+00:00'),
