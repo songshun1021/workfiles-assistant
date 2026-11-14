@@ -1,0 +1,5 @@
+packages:
+  - '.'
+overrides:
+  pend: 1.2.0
+  xmlchars: 2.2.0

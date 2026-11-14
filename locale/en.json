@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Work document assistant",
+    "description": "Shortcut-driven voice search and controlled opening, with fixed sidebar settings. Select broader macOS apps for local 7-day foreground hints; window titles and HTTPS URLs require separate per-app consent and manual Accessibility permission. New users start off; upgrades never widen consent. No body/browser-history capture, screenshots/OCR, idle audio or cloud-document connectors."
+  }
+}

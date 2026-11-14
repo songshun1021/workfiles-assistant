@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>工作文档 · 语音</title>
+  <link rel="stylesheet" href="./panel.css">
+  <script type="module" src="./panel.js"></script>
+</head>
+<body>
+  <main class="voice-panel" aria-label="工作文档语音助手" data-phase="ready">
+    <div class="taskbar">
+      <span class="voice-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="3" width="6" height="12" rx="3"></rect>
+          <path d="M5.5 10.5v1a6.5 6.5 0 0 0 13 0v-1M12 18v3M9 21h6"></path>
+        </svg>
+      </span>
+      <div class="task-copy">
+        <strong class="task-title">工作文档</strong>
+        <span id="status" role="status" aria-live="polite" aria-atomic="true">正在连接…</span>
+      </div>
+      <button id="primary" class="primary" type="button" disabled>开始说话</button>
+      <button id="cancel" class="quiet" type="button" title="取消本次任务（Esc）" disabled>取消</button>
+    </div>
+    <p id="echo" class="echo" aria-live="polite" aria-atomic="true" tabindex="0" hidden></p>
+    <p id="error" class="error" role="alert" tabindex="0" hidden></p>
+    <p id="detail" class="detail" hidden></p>
+    <progress id="progress" aria-label="本地语音准备进度" max="1" hidden></progress>
+    <div class="secondary">
+      <span id="hint" class="hint">仅在你开始说话后使用麦克风</span>
+      <meter id="level" min="0" max="1" value="0" aria-label="麦克风音量" hidden></meter>
+      <button id="typing-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="text-form" disabled>键盘输入</button>
+    </div>
+    <form id="text-form" class="text-form" hidden>
+      <label class="sr-only" for="text-input">输入任务，按 Enter 或点击发送才会提交</label>
+      <input id="text-input" type="text" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="输入任务，按 Enter 发送" enterkeyhint="send">
+      <button id="text-submit" class="primary" type="submit">发送</button>
+    </form>
+  </main>
+</body>
+</html>

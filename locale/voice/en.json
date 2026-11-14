@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Desktop voice entry",
+    "description": "A system-wide shortcut opens a controlled native panel. Final speech goes to a dedicated document task session, with clarification only when needed. Uses local SenseVoice by default and requires the official speech services and work document tools. No always-on recording."
+  }
+}

@@ -1,0 +1,17 @@
+# Machine-owned runtime copies of the desktop voice helper. Each machine builds
+# its own under ~/Library/Caches/DeepSeekHarness/WorkfilesVoice and records the
+# result here; never commit it (it contains absolute local paths and hashes).
+.native/
+
+# Local dependency install and package-manager state.
+node_modules/
+.pnpm-store/
+
+# Source snapshots used during development, not distribution contents.
+.ax-v0-*/
+*.tar.gz
+*.zip
+
+# macOS noise.
+.DS_Store
+Icon?

@@ -1,0 +1,70 @@
+{
+  "name": "@local/deepseek-workfiles",
+  "version": "0.5.1",
+  "private": true,
+  "description": "Opt-in seven-day macOS app and AX window hints, controlled desktop voice, scoped document search and safe observed-link opening.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22",
+    "dsh": "0.2.2-rc.3"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./voice": "./voice.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./voice/locale/*.json": "./locale/voice/*.json",
+    "./voice/icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "voice.js",
+    "client.js",
+    "lib",
+    "native",
+    "voice-ui",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "README.md",
+    "MACOS_CAPABILITIES.md",
+    "VERIFICATION.md",
+    "VOICE_PROTOCOL.md",
+    "OPEN_SOURCE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "for file in index.js client.js voice.js lib/*.js native/*.js native/*.mjs native/*.cjs voice-ui/*.js; do node --check \"$file\" || exit 1; done",
+    "build:native": "node native/build-helper.mjs --output-root \"$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice\""
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.19.0",
+    "saxes": "6.0.0",
+    "yauzl": "3.4.0",
+    "zod": "4.4.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0"
+  }
+}

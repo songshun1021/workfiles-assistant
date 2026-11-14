@@ -1,0 +1,596 @@
+import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
+import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback } from './view-state.js';
+
+// This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
+const bridge = window.workfilesVoice;
+const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
+const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit'].map(id => [id, document.getElementById(id)]));
+const panel = document.querySelector('.voice-panel');
+const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
+const ERRORS = {
+  'permission-denied': '麦克风权限未获允许。可在系统设置中允许后重试，或用键盘输入。',
+  'permission-timeout': '等待麦克风授权超时，已停止本次请求。可重试或用键盘输入。',
+  'input-unavailable': '麦克风不可用或正被占用。请检查输入设备后重试。',
+  'input-ended': '麦克风连接已中断，请重新连接后重试。',
+  'audio-processing-failed': '录音处理失败，麦克风已停止。请重试。',
+  'encoding-failed': '录音编码失败，麦克风已停止。请重试。',
+  'capture-unavailable': '无法开始录音。请检查麦克风权限，或用键盘输入。',
+};
+const HOST_RESPONSE_TIMEOUT_MS = 120000;
+let host = { activationId: '', capture: false, listen: false, visible: true, phase: 'ready', message: '', detail: '' };
+const retiredActivations = new Set();
+let disposed = false;
+let unsubscribe;
+let listenIntent = 0;
+let consumedIntent = -1;
+let lastSignalId = -1;
+let attempt;
+let captureActive = false;
+let elapsedMs = 0;
+let localError = '';
+let localNotice = '';
+let userBlocked = false;
+let typingOpen = false;
+let actionPending;
+let submission;
+let uncertainText;
+let operationTimer;
+let doneTimer;
+let doneKey = '';
+let feedbackRetention = updateFeedbackRetention(undefined, undefined);
+let speech;
+let speechEpoch = 0;
+let speechTailTimer;
+let resolvedQuestion = '';
+
+function showText(node, text) {
+  // Host/Agent/typed/OS text is always data. Never parse it as HTML or a URL.
+  const value = typeof text === 'string' ? text : '';
+  if (node.textContent !== value) node.textContent = value;
+  node.hidden = !value;
+}
+
+function clearDoneTimer() {
+  window.clearTimeout(doneTimer);
+  doneTimer = undefined;
+  doneKey = '';
+}
+
+function readingFeedback() {
+  const nodes = [ui.echo, ui.detail].filter(node => !node.hidden);
+  if (nodes.some(node => node.contains(document.activeElement))) return true;
+  try {
+    const selection = window.getSelection();
+    return Boolean(selection && !selection.isCollapsed && nodes.some(node => node.contains(selection.anchorNode) || node.contains(selection.focusNode)));
+  } catch { return false; }
+}
+
+function feedbackOverflows() {
+  return [ui.echo, ui.detail].some(node => !node.hidden && (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1));
+}
+
+function mayDismissFeedback() {
+  return host.phase === 'done' && shouldAutoDismissFeedback(host, {
+    retained: feedbackRetention.retained, reading: readingFeedback(), overflowing: feedbackOverflows(),
+    keyboardOpen: typingOpen, hasError: Boolean(localError), pageVisible: document.visibilityState !== 'hidden',
+  });
+}
+
+function retainFeedbackForReading() {
+  if (disposed || host.phase !== 'done') return;
+  feedbackRetention = updateFeedbackRetention(feedbackRetention, host, true);
+  clearDoneTimer();
+  render();
+}
+
+function syncFeedbackTimer() {
+  feedbackRetention = updateFeedbackRetention(feedbackRetention, host, host.phase === 'done' && (typingOpen || readingFeedback()));
+  if (!mayDismissFeedback()) { clearDoneTimer(); return; }
+  const key = feedbackRetention.key;
+  if (doneKey === key && doneTimer !== undefined) return;
+  clearDoneTimer();
+  doneKey = key;
+  doneTimer = window.setTimeout(() => {
+    doneTimer = undefined;
+    // Recheck focus/selection/overflow and the exact result at the firing boundary.
+    feedbackRetention = updateFeedbackRetention(feedbackRetention, host, readingFeedback());
+    if (!disposed && feedbackRetention.key === key && mayDismissFeedback()) requestAction('dismiss');
+    else { clearDoneTimer(); render(); }
+  }, SHORT_FEEDBACK_DISMISS_MS);
+}
+
+function clearOperationTimer() {
+  window.clearTimeout(operationTimer);
+  operationTimer = undefined;
+}
+
+function safeCaptureFact(activationId, active) {
+  if (!hasBridge) return;
+  try { Promise.resolve(bridge.capture({ activationId, active })).catch(() => {}); } catch { /* Tracks are already handled locally. */ }
+}
+
+function stopCapture() {
+  const previous = attempt;
+  attempt = undefined; // Invalidate the callback token before cleanup can reenter it.
+  if (previous) {
+    previous.cancelled = true;
+    previous.recorder.cancel();
+  }
+  captureActive = false;
+  elapsedMs = 0;
+  ui.level.value = 0;
+}
+
+function questionKey(state = host) {
+  return `${state.activationId}\u0000${state.phase === 'question' ? state.message : ''}`;
+}
+
+function stopSpeech() {
+  speechEpoch++;
+  const ownedOutput = Boolean(speech || speechTailTimer !== undefined);
+  window.clearTimeout(speechTailTimer);
+  speechTailTimer = undefined;
+  if (speech) {
+    window.clearTimeout(speech.timer);
+    speech.utterance.onend = speech.utterance.onerror = null;
+    speech = undefined;
+  }
+  if (ownedOutput) {
+    try { window.speechSynthesis?.cancel(); } catch { /* A busy output gate still prevents capture. */ }
+  }
+}
+
+function outputIsBusy() {
+  try {
+    return window.speechSynthesis?.speaking === true || window.speechSynthesis?.pending === true;
+  } catch { return true; } // If we cannot prove output stopped, do not open input.
+}
+
+function stopAll() {
+  stopCapture();
+  stopSpeech();
+  clearDoneTimer();
+  clearOperationTimer();
+  submission = undefined;
+  actionPending = undefined;
+}
+
+function canListen() {
+  return !disposed && hasBridge && !userBlocked && !typingOpen
+    && document.visibilityState !== 'hidden' && !outputIsBusy() && isCaptureIntent(host);
+}
+
+function beginOperationTimeout(activationId) {
+  clearOperationTimer();
+  operationTimer = window.setTimeout(() => {
+    if (disposed || host.activationId !== activationId) return;
+    stopAll();
+    userBlocked = true;
+    consumedIntent = listenIntent;
+    localError = '本次任务等待超时，已请求取消。请重试。';
+    localNotice = '';
+    // Cancels admitted server work too; merely abandoning a renderer Promise is insufficient.
+    try { Promise.resolve(bridge.action({ activationId, name: 'cancel' })).catch(() => {}); } catch { /* Show the retryable error. */ }
+    render();
+  }, HOST_RESPONSE_TIMEOUT_MS);
+}
+
+function markSendFailure(token, message) {
+  if (disposed || submission !== token || host.activationId !== token.activationId) return;
+  submission = undefined;
+  clearOperationTimer();
+  userBlocked = true;
+  localError = message;
+  render();
+}
+
+function finalAudio(current, result) {
+  if (disposed || attempt !== current || current.cancelled || current.submitted || host.activationId !== current.activationId) return;
+  current.submitted = true; // Commit once, before encoding/IPC or any reentrant callback.
+  attempt = undefined;
+  captureActive = false;
+  elapsedMs = 0;
+  userBlocked = true; // An unchanged listen:true snapshot is not a new utterance.
+  if (!result.hasSpeech || !result.wav) {
+    // No empty ASR admission. Native disarms and retires this activation/window;
+    // the next shortcut/record click is a fresh explicit attempt, not an old listen.
+    requestAction('cancel', '没有听到说话，本次录音已结束。');
+    return;
+  }
+  try {
+    const token = { activationId: current.activationId, utteranceId: window.crypto.randomUUID(), kind: 'audio' };
+    const wavBase64 = wavToBase64(result.wav);
+    // Cancellation/activation tokens are checked again at the actual send boundary.
+    if (disposed || current.cancelled || host.activationId !== current.activationId) return;
+    submission = token;
+    localError = localNotice = '';
+    beginOperationTimeout(token.activationId);
+    render();
+    Promise.resolve(bridge.audio({ activationId: token.activationId, utteranceId: token.utteranceId, wavBase64 }))
+      .catch(() => markSendFailure(token, '录音已停止，但发送失败。请重试或用键盘输入。'));
+  } catch {
+    submission = undefined;
+    clearOperationTimer();
+    localError = '无法提交录音，麦克风已停止。请重试或用键盘输入。';
+    render();
+  }
+}
+
+function beginCapture() {
+  if (!canListen() || attempt || speech || speechTailTimer !== undefined || consumedIntent === listenIntent || submission) return;
+  consumedIntent = listenIntent;
+  localError = localNotice = '';
+  const current = { activationId: host.activationId, cancelled: false, submitted: false, recorder: undefined };
+  current.recorder = createPcmCapture({
+    isAllowed: () => attempt === current && !current.cancelled && canListen() && !speech && speechTailTimer === undefined,
+    onActive(active) {
+      safeCaptureFact(current.activationId, active);
+      if (attempt === current) {
+        captureActive = active;
+        render();
+      }
+    },
+    onLevel(level) {
+      if (attempt !== current || current.cancelled) return;
+      elapsedMs = level.elapsedMs;
+      ui.level.value = Math.min(1, level.rms * 5);
+      render();
+    },
+    onResult: result => finalAudio(current, result),
+    onError(error) {
+      if (attempt !== current || current.cancelled || host.activationId !== current.activationId) return;
+      attempt = undefined;
+      captureActive = false;
+      userBlocked = true;
+      localError = ERRORS[error?.code] || ERRORS['capture-unavailable'];
+      render();
+    },
+  });
+  attempt = current;
+  // start() alone may request permission. Importing/constructing/ready()/peek never does.
+  void current.recorder.start();
+  render();
+}
+
+function speakQuestion() {
+  const key = questionKey();
+  if (!canListen() || host.phase !== 'question' || resolvedQuestion === key || speech) return;
+  stopCapture(); // Never leave an input stream alive during local speech output.
+  stopSpeech();
+  const synth = window.speechSynthesis;
+  let voice;
+  try { voice = selectLocalVoice(synth?.getVoices?.(), 'zh-CN'); } catch { /* Fall back to text, not a remote voice. */ }
+  if (!voice || !host.message || typeof window.SpeechSynthesisUtterance !== 'function') {
+    resolvedQuestion = key;
+    beginCapture();
+    return;
+  }
+  const epoch = speechEpoch;
+  const activationId = host.activationId;
+  let utterance;
+  try {
+    utterance = new window.SpeechSynthesisUtterance(host.message);
+    utterance.voice = voice; // Only localService:true voices can reach speak().
+    utterance.lang = voice.lang;
+    utterance.rate = 1;
+  } catch {
+    resolvedQuestion = key;
+    beginCapture();
+    return;
+  }
+  const current = { key, epoch, utterance, timer: undefined };
+  const finished = () => {
+    if (disposed || speech !== current || speechEpoch !== epoch || host.activationId !== activationId) return;
+    stopSpeech();
+    resolvedQuestion = key;
+    // Allow the final output tail to decay before any new input is opened.
+    speechTailTimer = window.setTimeout(() => {
+      speechTailTimer = undefined;
+      if (host.activationId === activationId && questionKey() === key) reconcile();
+    }, 200);
+    render();
+  };
+  utterance.onend = utterance.onerror = finished;
+  current.timer = window.setTimeout(finished, 30000);
+  speech = current;
+  render();
+  try { synth.cancel(); synth.speak(utterance); } catch { finished(); }
+}
+
+function reconcile() {
+  if (!canListen() || submission || speech || speechTailTimer !== undefined) return;
+  if (host.phase === 'question' && resolvedQuestion !== questionKey()) speakQuestion();
+  else beginCapture();
+}
+
+function normalizeState(value) {
+  if (!value || typeof value !== 'object' || !PHASES.has(value.phase)) return null;
+  if (value.activationId != null && (typeof value.activationId !== 'string' || value.activationId.length > 128)) return null;
+  return {
+    activationId: value.activationId || '', capture: value.capture === true, listen: value.listen === true,
+    visible: value.visible !== false, phase: value.phase,
+    message: typeof value.message === 'string' ? value.message.slice(0, 1000) : '',
+    detail: typeof value.detail === 'string' ? value.detail.slice(0, 1000) : '',
+    canPrepare: value.canPrepare === true,
+    progress: Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 1 ? value.progress : undefined,
+    signal: value.signal === 'stop-submit' ? value.signal : undefined,
+    signalId: Number.isSafeInteger(value.signalId) && value.signalId >= 0 ? value.signalId : undefined,
+  };
+}
+
+function applyState(value) {
+  if (disposed) return;
+  const next = normalizeState(value);
+  if (!next || (next.activationId && retiredActivations.has(next.activationId))) return;
+  const previous = host;
+  const changedActivation = next.activationId !== previous.activationId;
+  const changedQuestion = next.phase === 'question'
+    && (previous.phase !== 'question' || next.message !== previous.message);
+  if (changedActivation) {
+    if (previous.activationId) retiredActivations.add(previous.activationId);
+    stopAll();
+    localError = localNotice = '';
+    userBlocked = false;
+    typingOpen = false;
+    ui['text-input'].value = '';
+    uncertainText = undefined;
+    resolvedQuestion = '';
+    consumedIntent = -1;
+    lastSignalId = -1;
+  }
+  host = next;
+  const nextIntent = isCaptureIntent(next);
+  if (nextIntent && (changedActivation || !isCaptureIntent(previous) || changedQuestion)) {
+    listenIntent++;
+    // Only a fresh Host listen grant/new question may follow an already submitted turn.
+    if (!typingOpen) userBlocked = false;
+    localError = localNotice = '';
+  }
+  const stopSignal = next.signal === 'stop-submit' && next.signalId !== undefined && next.signalId > lastSignalId;
+  if (stopSignal) lastSignalId = next.signalId;
+  // This trusted one-shot native signal is processed before capture:false/listen:false.
+  // All ordinary disarms/cancellations discard audio instead of submitting it.
+  if (stopSignal && !changedActivation && attempt && next.visible
+      && (next.phase === 'listening' || next.phase === 'question')) {
+    attempt.recorder.finish('shortcut');
+  } else if (!nextIntent || changedQuestion) {
+    stopCapture();
+  }
+  if (!nextIntent || changedQuestion) stopSpeech();
+  if (!next.visible || !next.activationId) {
+    stopAll();
+    userBlocked = true;
+    typingOpen = false;
+  }
+  if (next.phase !== 'done') clearDoneTimer();
+  const stateAdvanced = changedActivation || next.phase !== previous.phase || next.message !== previous.message;
+  if (stateAdvanced && ['ready', 'preparing', 'transcribing', 'working', 'question', 'done', 'error'].includes(next.phase)) {
+    if (submission?.kind === 'text' && submission.activationId === next.activationId
+        && ['transcribing', 'working', 'question', 'done'].includes(next.phase)) {
+      // The Host may advance before the native IPC acknowledgement resolves.
+      // Clear accepted text once, but retain keyboard mode until an explicit voice retry.
+      ui['text-input'].value = '';
+      uncertainText = undefined;
+    }
+    submission = undefined;
+    actionPending = undefined;
+  }
+  if (stateAdvanced && ['ready', 'question', 'done', 'error'].includes(next.phase)) clearOperationTimer();
+  feedbackRetention = updateFeedbackRetention(feedbackRetention, host, host.phase === 'done' && (typingOpen || readingFeedback()));
+  render();
+  syncFeedbackTimer();
+  reconcile();
+}
+
+function requestAction(name, cancelNotice = '') {
+  if (disposed || !hasBridge || !host.activationId) return;
+  const activationId = host.activationId;
+  stopAll();
+  userBlocked = true;
+  consumedIntent = listenIntent;
+  localError = '';
+  localNotice = name === 'cancel' ? cancelNotice || '已停止录音，正在取消任务…' : '';
+  if (name === 'cancel' || name === 'dismiss') typingOpen = false;
+  if (name === 'retry') {
+    typingOpen = false;
+    ui['text-input'].value = '';
+    uncertainText = undefined;
+  }
+  const token = { activationId, name };
+  actionPending = token;
+  render();
+  try {
+    Promise.resolve(bridge.action({ activationId, name })).then(() => {
+      if (disposed || actionPending !== token || host.activationId !== activationId) return;
+      actionPending = undefined;
+      if (name === 'cancel') localNotice = cancelNotice || '录音已停止，已请求取消本次任务。';
+      render();
+      // retry does not reuse an old Host listen snapshot. Native creates a new armed UUID.
+    }).catch(() => {
+      if (disposed || actionPending !== token || host.activationId !== activationId) return;
+      actionPending = undefined;
+      localError = name === 'cancel' ? '麦克风已停止，但取消请求未送达。请重试。' : '请求未送达，请重试。';
+      render();
+    });
+  } catch {
+    actionPending = undefined;
+    localError = '原生语音组件未响应，请重试。';
+    render();
+  }
+}
+
+function render() {
+  if (disposed) return;
+  const exists = hasBridge && Boolean(host.activationId) && host.visible;
+  const recording = Boolean(attempt);
+  const busy = Boolean(submission) || ['preparing', 'transcribing', 'working'].includes(host.phase);
+  const needsExplicitStart = !recording && !speech && !submission && !busy && !host.canPrepare
+    && (userBlocked || consumedIntent === listenIntent);
+  const status = selectPanelStatus({
+    hasBridge, activationId: host.activationId, phase: host.phase, keyboardOpen: typingOpen,
+    captureActive, recording, elapsedMs, speaking: Boolean(speech), submitting: Boolean(submission),
+    hasError: Boolean(localError), hasNotice: Boolean(localNotice), needsExplicitStart,
+  });
+  if (ui.status.textContent !== status) ui.status.textContent = status;
+  ui.status.title = status;
+  panel.dataset.phase = localError ? 'error' : recording ? 'listening' : typingOpen || needsExplicitStart ? 'ready' : host.phase;
+  let label = '开始说话';
+  if (recording) label = captureActive ? '停止提交' : '停止';
+  else if (speech) label = '跳过朗读';
+  else if (host.phase === 'preparing') label = '准备中';
+  else if (submission || ['transcribing', 'working'].includes(host.phase)) label = '处理中';
+  else if (host.canPrepare && host.phase !== 'question') label = '准备语音';
+  else if (localError || localNotice || host.phase === 'error') label = '重试';
+  else if (needsExplicitStart && ['ready', 'listening', 'question'].includes(host.phase)) label = '开始说话';
+  else if (host.phase === 'question') label = '回答';
+  else if (host.phase === 'done') label = '再次说话';
+  ui.primary.textContent = label;
+  ui.primary.disabled = !exists || Boolean(actionPending) || (busy && !recording && !speech);
+  ui.cancel.disabled = !exists;
+  ui.cancel.textContent = host.phase === 'done' ? '收起' : '取消';
+  ui.cancel.title = host.phase === 'done' ? '收起结果（Esc）' : '取消本次任务（Esc）';
+  showText(ui.echo, selectPanelEcho({ phase: host.phase, message: host.message, captureActive }));
+  showText(ui.error, localError || (host.phase === 'error' ? host.message || '任务未完成，请重试。' : ''));
+  showText(ui.detail, host.detail);
+  ui.progress.hidden = host.phase !== 'preparing';
+  if (host.progress === undefined) ui.progress.removeAttribute('value');
+  else ui.progress.value = host.progress;
+  ui.level.hidden = !captureActive;
+  let hint = '快捷键唤起后说话 · Esc 取消';
+  if (!hasBridge) hint = '请通过已安装插件启动原生语音组件';
+  else if (localNotice) hint = localNotice;
+  else if (recording) hint = captureActive ? '停顿约 1.1 秒自动提交 · 最长 20 秒' : '仅本次使用 · 可随时取消';
+  else if (speech) hint = '仅使用设备本地语音，朗读结束后再聆听';
+  else if (typingOpen) hint = '仅按 Enter 或点击发送才会提交';
+  else if (host.canPrepare) hint = '首次使用：点击准备本地识别，不会开启麦克风';
+  else if (needsExplicitStart && ['ready', 'listening', 'question'].includes(host.phase)) hint = '点击开始说话继续录音';
+  else if (host.phase === 'done') hint = mayDismissFeedback() ? '本次任务已结束 · 即将收起' : '结果已保留 · 阅读完点击收起';
+  ui.hint.textContent = hint;
+  ui.hint.title = hint;
+  ui['typing-toggle'].disabled = !exists || busy || Boolean(actionPending);
+  ui['typing-toggle'].textContent = typingOpen ? '收起输入' : '键盘输入';
+  ui['typing-toggle'].setAttribute('aria-expanded', String(typingOpen));
+  ui['text-form'].hidden = !typingOpen;
+  ui['text-input'].disabled = busy || !exists;
+  ui['text-submit'].disabled = busy || !exists || !ui['text-input'].value.trim();
+}
+
+// Focus/selection/scroll are reading intent, not microphone or submission gestures.
+ui.detail.tabIndex = 0;
+for (const node of [ui.echo, ui.detail]) {
+  node.addEventListener('focusin', retainFeedbackForReading);
+  node.addEventListener('pointerdown', retainFeedbackForReading);
+  node.addEventListener('wheel', retainFeedbackForReading, { passive: true });
+}
+document.addEventListener('scroll', retainFeedbackForReading, { capture: true, passive: true });
+document.addEventListener('selectionchange', () => { if (readingFeedback()) retainFeedbackForReading(); });
+
+ui.primary.addEventListener('click', () => {
+  if (ui.primary.disabled) return;
+  if (attempt) { attempt.recorder.finish('manual'); return; }
+  if (speech) {
+    const key = speech.key;
+    stopSpeech();
+    resolvedQuestion = key;
+    speechTailTimer = window.setTimeout(() => { speechTailTimer = undefined; reconcile(); }, 200);
+    render();
+    return;
+  }
+  requestAction(host.canPrepare && host.phase !== 'question' ? 'prepare' : 'retry');
+});
+ui.cancel.addEventListener('click', () => requestAction(host.phase === 'done' ? 'dismiss' : 'cancel'));
+ui['typing-toggle'].addEventListener('click', () => {
+  if (ui['typing-toggle'].disabled) return;
+  typingOpen = !typingOpen;
+  if (typingOpen) {
+    feedbackRetention = updateFeedbackRetention(feedbackRetention, host, true);
+    consumedIntent = listenIntent;
+    stopCapture();
+    stopSpeech();
+    clearDoneTimer();
+  }
+  render();
+  if (typingOpen) ui['text-input'].focus();
+});
+ui['text-input'].addEventListener('input', () => {
+  if (uncertainText && uncertainText.text !== ui['text-input'].value.trim()) uncertainText = undefined;
+  render(); // Never submit a draft, change event, or recovered text automatically.
+});
+ui['text-form'].addEventListener('submit', event => {
+  event.preventDefault();
+  const text = ui['text-input'].value.trim();
+  if (disposed || !typingOpen || ui['text-submit'].disabled || !text || text.length > 2000) return;
+  stopCapture();
+  stopSpeech();
+  clearDoneTimer();
+  userBlocked = true;
+  consumedIntent = listenIntent;
+  localError = localNotice = '';
+  try {
+    const payload = uncertainText && uncertainText.activationId === host.activationId && uncertainText.text === text
+      ? uncertainText : { activationId: host.activationId, utteranceId: window.crypto.randomUUID(), text };
+    const token = { ...payload, kind: 'text' };
+    submission = token;
+    beginOperationTimeout(token.activationId);
+    render();
+    Promise.resolve(bridge.text(payload)).then(() => {
+      if (disposed || submission !== token || host.activationId !== token.activationId) return;
+      uncertainText = undefined;
+      ui['text-input'].value = '';
+      // Keyboard fallback never silently reopens the microphone for a follow-up.
+      // A subsequent explicit record/retry creates a fresh native armed activation.
+      render();
+    }).catch(() => {
+      if (submission !== token || host.activationId !== token.activationId) return;
+      uncertainText = payload; // An explicit retry of this exact draft reuses its dedupe ID.
+      markSendFailure(token, '文字发送失败。内容已保留，请按 Enter 或点击发送重试。');
+    });
+  } catch {
+    submission = undefined;
+    clearOperationTimer();
+    localError = '无法提交文字，请重试。';
+    render();
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !event.isComposing && host.activationId) {
+    event.preventDefault();
+    requestAction(host.phase === 'done' ? 'dismiss' : 'cancel');
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    stopAll();
+    userBlocked = true;
+    consumedIntent = listenIntent;
+  }
+  render();
+  reconcile();
+});
+
+function dispose() {
+  if (disposed) return;
+  stopAll();
+  disposed = true;
+  try { unsubscribe?.(); } catch { /* Native also tears down on renderer/window loss. */ }
+}
+window.addEventListener('pagehide', dispose, { once: true });
+window.addEventListener('beforeunload', dispose, { once: true });
+render();
+if (hasBridge) {
+  let receivedEvent = false;
+  try {
+    unsubscribe = bridge.onState(state => { receivedEvent = true; applyState(state); });
+    Promise.resolve(bridge.ready()).then(state => {
+      // A ready() reply must not overwrite a more recent state/activation event.
+      if (!receivedEvent) applyState(state);
+    }).catch(() => {
+      if (disposed || receivedEvent) return;
+      localError = '原生语音组件未就绪，请重新唤起。';
+      render();
+    });
+  } catch {
+    localError = '原生语音组件连接失败，请重新唤起。';
+    render();
+  }
+}
