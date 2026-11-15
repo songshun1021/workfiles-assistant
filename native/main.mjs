@@ -45,6 +45,11 @@ function notice(code, message) { send({ v: 1, type: 'notice', code, message }); 
 // task, not the form. Background agents keep the full panel for questions/results.
 const PANEL_FULL = Object.freeze({ width: 620, height: 200 });
 const PANEL_COMPACT = Object.freeze({ width: 460, height: 124 });
+// A conversation is taller: the transcript needs room, and the overflow affordance keeps
+// the clipped edge honest instead of hiding text inside the card. Two steps, because an
+// always-tall card would be mostly empty for a two-turn exchange.
+const PANEL_TALL = Object.freeze({ width: 620, height: 352 });
+const PANEL_CONVERSATION = Object.freeze({ width: 620, height: 268 });
 const COMPACT_PHASES = new Set(['preparing', 'listening', 'transcribing', 'working']);
 
 /* --------------------------------------------------------------- motion ----
@@ -106,9 +111,19 @@ function animateWindow({ to, duration, ease, size = null, opacity = null, guard 
   };
   token.timer = setTimeout(step, 0);
 }
+/** How tall a conversation needs to be, estimated from what it says. The page cannot
+ * measure the window for the helper, so this stays a cheap, honest approximation. */
+function conversationSize(state) {
+  const turns = Array.isArray(state?.turns) ? state.turns : [];
+  if (turns.length < 2) return null;
+  const rows = turns.reduce((total, turn) => total + (Array.isArray(turn.items) ? turn.items.length : 0), 0);
+  const lines = turns.reduce((total, turn) => total + Math.min(3, Math.ceil(Array.from(String(turn.text || '')).length / 38)), 0);
+  return lines + rows <= 6 ? PANEL_CONVERSATION : PANEL_TALL;
+}
 function applyDensity(state) {
   if (!window || window.isDestroyed() || !state?.visible || !window.isVisible()) return;
-  const size = COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL;
+  const size = conversationSize(state)
+    ?? (COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL);
   // Every state update republishes the same phase; only a real density change may move
   // the frame, and a morph already heading for this size must not be restarted.
   if (motion?.size && motion.size.width === size.width && motion.size.height === size.height) return;
@@ -209,7 +224,8 @@ async function ensureWindow({ activationId, title, focus = true }) {
   // Open at the size this activation will actually use: a shortcut pressed to talk should
   // never appear at full size and then shrink under the cursor.
   const openingState = controller?.snapshot();
-  const opening = COMPACT_PHASES.has(openingState?.phase) || openingState?.capture === true ? PANEL_COMPACT : PANEL_FULL;
+  const opening = conversationSize(openingState)
+    ?? (COMPACT_PHASES.has(openingState?.phase) || openingState?.capture === true ? PANEL_COMPACT : PANEL_FULL);
   const width = Math.min(opening.width, workArea.width), height = Math.min(opening.height, workArea.height);
   const ownedWindow = new BrowserWindow({
     width, height, x: Math.round(workArea.x + (workArea.width - width) / 2), y: Math.round(workArea.y + Math.max(24, workArea.height * 0.16)),
@@ -316,7 +332,9 @@ app.whenReady().then(async () => {
     register: (accelerator, callback) => globalShortcut.register(accelerator, () => { try { callback(); } catch (error) { reportOperationError(error); } }),
     unregister: accelerator => globalShortcut.unregister(accelerator),
     onState: publish,
-    onHide: ({ activationId, reason }) => reason === 'replacement' ? destroyWindow(activationId) : absorbWindow(activationId),
+    onHide: ({ activationId, reason }) => reason === 'replacement' ? destroyWindow(activationId)
+      : reason === 'continue' ? undefined // the next activation reuses this window
+      : absorbWindow(activationId),
     onShow: options => { ensureWindow(options).catch(() => { if (!exiting && controller.snapshot().visible && controller.snapshot().activationId === options.activationId) fatal('PANEL_LOAD_FAILED', 'The real native voice panel could not be loaded.'); }); },
   });
   // The panel may copy one string it is already showing (a path or a saved address).

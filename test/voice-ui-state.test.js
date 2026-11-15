@@ -144,3 +144,31 @@ test('a voice gesture prepares itself once per activation instead of asking for 
   assert.equal(shouldAutoPrepare({ phase: 'working', canPrepare: true, captureIntent: true, activationId: 'a' }), false);
   assert.equal(shouldAutoPrepare({ phase: 'ready', canPrepare: false, captureIntent: true, activationId: 'a' }), false);
 });
+
+test('the transcript projection bounds roles, text and rows; the overflow label is honest', async () => {
+  const { selectPanelThread, threadOverflow, MAX_THREAD_TURNS, THREAD_TEXT_MAX } = await import('../voice-ui/view-state.js');
+  const turns = [
+    { role: 'user', text: '帮我找环润讯的推文' },
+    { role: 'assistant', text: '找到 2 条', items: [{ name: 'e-bot-panel', type: 'HTML', folder: '/a/ui-concepts/archive', copy: '/a/ui-concepts/archive/e-bot-panel.html', copyKind: 'path' }] },
+    { role: 'system', text: 'ignored' },
+    { role: 'user', text: '   ' },
+    { role: 'assistant', text: 'x'.repeat(THREAD_TEXT_MAX + 50) },
+  ];
+  const projected = selectPanelThread({ turns });
+  assert.equal(projected.length, 3);
+  assert.deepEqual(projected.map(turn => turn.role), ['user', 'assistant', 'assistant']);
+  assert.equal(projected[1].items[0].folderLabel, 'ui-concepts/archive');
+  assert.equal(projected[1].items[0].copyKind, 'path');
+  assert.equal(projected[2].text.length, THREAD_TEXT_MAX);
+  // Nine turns keep the newest eight.
+  const many = Array.from({ length: 12 }, (_, index) => ({ role: 'user', text: `第 ${index} 句` }));
+  const kept = selectPanelThread({ turns: many });
+  assert.equal(kept.length, MAX_THREAD_TURNS);
+  assert.equal(kept.at(-1).text, '第 11 句');
+  // A user turn never carries rows, even if the Host sent them.
+  assert.equal(selectPanelThread({ turns: [{ role: 'user', text: 'x', items: [{ name: 'a' }] }] })[0].items, undefined);
+
+  assert.deepEqual(threadOverflow({ below: 2, above: 1 }), { edge: 'bottom', label: '还没看完 · 还有 2 段' });
+  assert.deepEqual(threadOverflow({ above: 3 }), { edge: 'top', label: '上面还有 3 段' });
+  assert.deepEqual(threadOverflow({}), { edge: '', label: '' });
+});

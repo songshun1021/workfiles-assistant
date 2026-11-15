@@ -438,3 +438,41 @@ test('presentation rows may carry a type chip and a copy string, and nothing els
     Array.from({ length: 6 }, () => ({ name: 'x' })),
   ]) assert.throws(() => parseHostMessage({ ...base, items }), undefined, JSON.stringify(items).slice(0, 80));
 });
+
+test('a transcript is bounded on the wire: roles, text, rows, and no unknown fields', async () => {
+  const { parseHostMessage } = await import('../native/protocol.mjs');
+  const base = { v: 1, type: 'state', activationId: 'activation-a', phase: 'done' };
+  const rows = [{ name: '稿子', type: 'HTML', copy: '/a/稿子.html', copyKind: 'path' }];
+  const accepted = parseHostMessage({ ...base, turns: [{ role: 'user', text: '帮我找环润讯的推文' }, { role: 'assistant', text: '找到 2 条', items: rows }] });
+  assert.equal(accepted.turns.length, 2);
+  assert.equal(accepted.turns[1].items[0].type, 'HTML');
+  for (const turns of [
+    [{ role: 'system', text: 'x' }],
+    [{ role: 'user', text: '' }],
+    [{ role: 'user', text: 'x'.repeat(601) }],
+    [{ role: 'user', text: 'x', extra: 1 }],
+    [{ role: 'assistant', text: 'x', items: Array.from({ length: 6 }, () => ({ name: 'y' })) }],
+    Array.from({ length: 9 }, () => ({ role: 'user', text: 'x' })),
+    'not-an-array',
+  ]) assert.throws(() => parseHostMessage({ ...base, turns }), undefined, JSON.stringify(turns).slice(0, 60));
+});
+
+test('a settled panel continues in the same window instead of closing and reopening', () => {
+  const f = fixture(); f.init(); f.controller.shortcut();
+  const first = f.controller.snapshot().activationId;
+  f.state('done', { message: '找到 2 条' });
+  const hides = f.hides.length;
+  f.controller.shortcut();
+  // The old activation is retired quietly (reason "continue") and no window teardown is asked for.
+  assert.equal(f.hides.length, hides + 1);
+  assert.equal(f.hides.at(-1).reason, 'continue');
+  assert.equal(f.hides.at(-1).activationId, first);
+  assert.notEqual(f.controller.snapshot().activationId, first);
+  assert.equal(f.controller.snapshot().visible, true);
+  // While the microphone is open a shortcut still means stop-and-submit, not a new turn.
+  f.state('listening', { listen: true });
+  const armed = f.controller.snapshot().activationId;
+  f.controller.shortcut();
+  assert.equal(f.controller.snapshot().activationId, armed);
+  assert.equal(f.controller.snapshot().signal, 'stop-submit');
+});

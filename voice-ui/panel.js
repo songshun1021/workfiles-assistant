@@ -1,12 +1,12 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, selectPanelItems, shouldAutoPrepare } from './view-state.js';
+import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, selectPanelItems, selectPanelThread, shouldAutoPrepare, threadOverflow } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
 const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
 // Copy is an optional bridge capability: without it the row simply shows no button.
 const canCopy = Boolean(hasBridge && typeof bridge.clipboard === 'function');
-const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content', 'items'].map(id => [id, document.getElementById(id)]));
+const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content', 'items', 'thread', 'more', 'more-label'].map(id => [id, document.getElementById(id)]));
 const panel = document.querySelector('.voice-panel');
 const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
 
@@ -204,7 +204,7 @@ const ERRORS = {
   'capture-unavailable': '无法开始录音。请检查麦克风权限，或用键盘输入。',
 };
 const HOST_RESPONSE_TIMEOUT_MS = 120000;
-let host = { activationId: '', capture: false, listen: false, visible: true, phase: 'ready', message: '', detail: '', items: [] };
+let host = { activationId: '', capture: false, listen: false, visible: true, phase: 'ready', message: '', detail: '', items: [], turns: [] };
 const retiredActivations = new Set();
 let disposed = false;
 let unsubscribe;
@@ -312,26 +312,92 @@ const FAILED_GLYPH = ['M7 7l10 10', 'M17 7L7 17'];
 
 // Rows are display-only: a type chip, the name, short location, and — when the bridge
 // supports it — a button that copies the exact path or saved link the Host supplied.
+function rowNode(row) {
+  const item = document.createElement('li'); item.className = 'voice-item';
+  if (row.type) { const chip = document.createElement('span'); chip.className = 'voice-item-type'; chip.textContent = row.type; item.append(chip); }
+  const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
+  const meta = document.createElement('span'); meta.className = 'voice-item-meta';
+  meta.textContent = [row.folderLabel, shortStamp(row.modifiedAt)].filter(Boolean).join(' · ');
+  item.append(name, meta);
+  if (canCopy && row.copy) item.append(copyButton(row));
+  return item;
+}
+
 function renderItems() {
   const rows = selectPanelItems({ phase: host.phase, items: host.items });
   const key = rows.map(row => [row.name, row.folderLabel, row.modifiedAt, row.type, row.copy].join('\u0001')).join('\u0002');
   if (key === itemsKey) return;
   itemsKey = key;
   if (!rows.length) { ui.items.replaceChildren(); ui.items.hidden = true; return; }
-  ui.items.replaceChildren(...rows.map(row => {
-    const item = document.createElement('li'); item.className = 'voice-item';
-    if (row.type) {
-      const chip = document.createElement('span'); chip.className = 'voice-item-type'; chip.textContent = row.type;
-      item.append(chip);
-    }
-    const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
-    const meta = document.createElement('span'); meta.className = 'voice-item-meta';
-    meta.textContent = [row.folderLabel, shortStamp(row.modifiedAt)].filter(Boolean).join(' · ');
-    item.append(name, meta);
-    if (canCopy && row.copy) item.append(copyButton(row));
-    return item;
-  }));
+  ui.items.replaceChildren(...rows.map(rowNode));
   ui.items.hidden = false;
+}
+
+/** The conversation so far. Two or more turns take over the card: the transcript replaces
+ * the single-line result, the current turn keeps the live line below it, and anything the
+ * transcript cannot show is announced by the pill in the action row. */
+let threadKey = '';
+function renderThread() {
+  const turns = selectPanelThread({ turns: host.turns });
+  const threaded = turns.length >= 2;
+  panel.classList.toggle('is-thread', threaded);
+  ui.thread.hidden = !threaded;
+  if (!threaded) {
+    if (threadKey) { threadKey = ''; ui.thread.replaceChildren(); }
+    syncOverflow();
+    return;
+  }
+  // The current result already ends the transcript; do not draw those rows twice.
+  ui.items.hidden = true;
+  const key = turns.map(turn => `${turn.role}\u0001${turn.text}\u0001${(turn.items || []).map(row => [row.name, row.type, row.folderLabel, row.modifiedAt].join('|')).join(',')}`).join('\u0002');
+  if (key !== threadKey) {
+    const atEnd = ui.thread.scrollHeight - ui.thread.scrollTop - ui.thread.clientHeight < 12;
+    threadKey = key;
+    ui.thread.replaceChildren(...turns.map(turn => {
+      const node = document.createElement('div');
+      node.className = `voice-turn is-${turn.role}`;
+      if (turn.role === 'user') {
+        const who = document.createElement('span'); who.className = 'voice-turn-who'; who.textContent = '你';
+        const say = document.createElement('span'); say.className = 'voice-turn-say'; say.textContent = turn.text;
+        node.append(who, say);
+      } else {
+        const say = document.createElement('span'); say.className = 'voice-turn-say'; say.textContent = turn.text;
+        node.append(say);
+        if (turn.items && turn.items.length) {
+          const list = document.createElement('ul'); list.className = 'voice-rows';
+          list.append(...turn.items.map(rowNode));
+          node.append(list);
+        }
+      }
+      return node;
+    }));
+    readerScrolled = false;
+    if (atEnd || !threadKey) ui.thread.scrollTop = ui.thread.scrollHeight;
+  }
+  syncOverflow();
+}
+
+/** Say how much is out of view instead of leaving it to a hidden scrollbar. */
+function syncOverflow() {
+  const thread = ui.thread;
+  if (thread.hidden || !thread.clientHeight) {
+    ui.more.hidden = true;
+    delete thread.dataset.fade;
+    return;
+  }
+  const viewTop = thread.scrollTop, viewBottom = viewTop + thread.clientHeight;
+  const turns = [...thread.children];
+  // Partly visible content is still hidden content: count a turn whenever any of it is
+  // outside the viewport, on the side it is clipped.
+  const above = turns.filter(node => node.offsetTop < viewTop - 4).length;
+  const below = turns.filter(node => node.offsetTop + node.offsetHeight > viewBottom + 4).length;
+  const { edge, label } = threadOverflow({ above, below });
+  ui.more.hidden = !edge;
+  if (edge) {
+    ui.more.dataset.edge = edge;
+    if (ui['more-label'].textContent !== label) ui['more-label'].textContent = label;
+  }
+  thread.dataset.fade = above && below ? 'both' : below ? 'bottom' : above ? 'top' : 'off';
 }
 
 function copyButton(row) {
@@ -409,6 +475,9 @@ function retainFeedbackForReading() {
 }
 
 function syncFeedbackTimer() {
+  // A conversation is meant to be read and continued; it closes on the user's gesture (or
+  // the Host's idle timeout), never on a 2-second timer.
+  if (panel.classList.contains('is-thread')) { clearDoneTimer(); return; }
   feedbackRetention = updateFeedbackRetention(feedbackRetention, host, host.phase === 'done' && (typingOpen || readingFeedback()));
   if (!mayDismissFeedback()) { clearDoneTimer(); return; }
   const key = feedbackRetention.key;
@@ -633,6 +702,20 @@ function reconcile() {
   else beginCapture();
 }
 
+/** One row shape for anything the Host sends: the current result and every transcript
+ * turn use it, so the renderer never has to know which list it is looking at. */
+function hostRows(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5).flatMap(item => item && typeof item.name === 'string' && item.name.trim() ? [{
+    name: item.name.slice(0, 300),
+    ...(typeof item.folder === 'string' ? { folder: item.folder.slice(0, 4096) } : {}),
+    ...(typeof item.modifiedAt === 'string' ? { modifiedAt: item.modifiedAt.slice(0, 64) } : {}),
+    ...(typeof item.type === 'string' ? { type: item.type.slice(0, 8) } : {}),
+    ...(typeof item.copy === 'string' ? { copy: item.copy.slice(0, 4096) } : {}),
+    ...(item.copyKind === 'link' || item.copyKind === 'path' ? { copyKind: item.copyKind } : {}),
+  }] : []);
+}
+
 function normalizeState(value) {
   if (!value || typeof value !== 'object' || !PHASES.has(value.phase)) return null;
   if (value.activationId != null && (typeof value.activationId !== 'string' || value.activationId.length > 128)) return null;
@@ -642,14 +725,12 @@ function normalizeState(value) {
     message: typeof value.message === 'string' ? value.message.slice(0, 1000) : '',
     detail: typeof value.detail === 'string' ? value.detail.slice(0, 1000) : '',
     canPrepare: value.canPrepare === true,
-    items: Array.isArray(value.items) ? value.items.slice(0, 5).flatMap(item => item && typeof item.name === 'string' && item.name ? [{
-      name: item.name.slice(0, 300),
-      ...(typeof item.folder === 'string' ? { folder: item.folder.slice(0, 4096) } : {}),
-      ...(typeof item.modifiedAt === 'string' ? { modifiedAt: item.modifiedAt.slice(0, 64) } : {}),
-      ...(typeof item.type === 'string' ? { type: item.type.slice(0, 8) } : {}),
-      ...(typeof item.copy === 'string' ? { copy: item.copy.slice(0, 4096) } : {}),
-      ...(item.copyKind === 'link' || item.copyKind === 'path' ? { copyKind: item.copyKind } : {}),
-    }] : []) : [],
+    items: hostRows(value.items),
+    turns: Array.isArray(value.turns) ? value.turns.slice(-8).flatMap(turn => {
+      if (!turn || (turn.role !== 'user' && turn.role !== 'assistant') || typeof turn.text !== 'string' || !turn.text.trim()) return [];
+      const items = turn.role === 'assistant' ? hostRows(turn.items) : [];
+      return [{ role: turn.role, text: turn.text.slice(0, 600), items }];
+    }) : [],
     progress: Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 1 ? value.progress : undefined,
     signal: value.signal === 'stop-submit' ? value.signal : undefined,
     signalId: Number.isSafeInteger(value.signalId) && value.signalId >= 0 ? value.signalId : undefined,
@@ -768,7 +849,9 @@ function render() {
   else if (panel.dataset.pinned === '1') unpinContent();
   // Density is a pure policy over the Host phase, shared with the native helper so the
   // frame and the interior can never disagree about which shape this task has.
-  const density = panelDensity(host.phase);
+  // A conversation keeps the tall shape for the whole stretch, including the next turn:
+  // switching back to the compact pill mid-conversation would look like a different card.
+  const density = host.turns.length >= 2 ? 'full' : panelDensity(host.phase);
   if (panel.dataset.density !== density) panel.dataset.density = density;
   const exists = hasBridge && Boolean(host.activationId) && host.visible;
   const recording = Boolean(attempt);
@@ -837,6 +920,10 @@ function render() {
   showText(ui.error, localError || (host.phase === 'error' ? host.message || '任务未完成，请重试。' : ''));
   showText(ui.detail, host.detail);
   renderItems();
+  renderThread();
+  // In a conversation the last assistant turn already ends the transcript, so the live
+  // title line is redundant once the turn settles.
+  panel.classList.toggle('is-settled', !recording && !busy && !speech && !submission && (host.phase === 'done' || host.phase === 'ready'));
   ui.progress.hidden = host.phase !== 'preparing';
   if (host.progress === undefined) ui.progress.removeAttribute('value');
   else ui.progress.value = host.progress;
@@ -872,6 +959,20 @@ for (const node of [ui.echo, ui.detail]) {
 }
 document.addEventListener('scroll', retainFeedbackForReading, { capture: true, passive: true });
 document.addEventListener('selectionchange', () => { if (readingFeedback()) retainFeedbackForReading(); });
+
+let readerScrolled = false;
+ui.thread.addEventListener('scroll', () => { syncOverflow(); }, { passive: true });
+for (const type of ['wheel', 'pointerdown', 'touchstart']) ui.thread.addEventListener(type, () => { readerScrolled = true; }, { passive: true });
+window.addEventListener('resize', () => {
+  // The helper changes the frame size after a turn; keep the newest line in view unless the
+  // reader deliberately scrolled back through the transcript.
+  if (!readerScrolled && panel.classList.contains('is-thread')) ui.thread.scrollTop = ui.thread.scrollHeight;
+  syncOverflow();
+});
+ui.more.addEventListener('click', () => {
+  const direction = ui.more.dataset.edge === 'top' ? -1 : 1;
+  ui.thread.scrollBy({ top: direction * Math.max(80, ui.thread.clientHeight * 0.8), behavior: 'smooth' });
+});
 
 ui.primary.addEventListener('click', () => {
   if (ui.primary.disabled) return;

@@ -77,14 +77,14 @@ export function parseHostMessage(input) {
     case 'show':
       fields(m, ['activationId', 'capture']); id(m.activationId); bool(m.capture, 'capture'); break;
     case 'state':
-      fields(m, ['activationId', 'phase'], ['message', 'detail', 'listen', 'canPrepare', 'progress', 'items']); id(m.activationId);
+      fields(m, ['activationId', 'phase'], ['message', 'detail', 'listen', 'canPrepare', 'progress', 'items', 'turns']); id(m.activationId);
       if (!PHASES.includes(m.phase)) fail('Invalid phase');
       optionalText(m, 'message', 1000); optionalText(m, 'detail', 1000);
-      if (own(m, 'items')) {
-        // Display-only rows for the panel. They carry no id and no path authority, so the
-        // renderer can show what was found without ever holding an open capability.
-        if (!Array.isArray(m.items) || m.items.length > 5) fail('Invalid items');
-        for (const item of m.items) {
+      // Display-only rows for the panel. They carry no id and no path authority, so the
+      // renderer can show what was found without ever holding an open capability.
+      const rows = value => {
+        if (!Array.isArray(value) || value.length > 5) fail('Invalid items');
+        for (const item of value) {
           if (!item || typeof item !== 'object' || Array.isArray(item) || Object.getPrototypeOf(item) !== Object.prototype) fail('Invalid items');
           for (const key of Reflect.ownKeys(item)) {
             if (!['name', 'folder', 'modifiedAt', 'type', 'copy', 'copyKind'].includes(key)) fail('Unknown item field');
@@ -98,6 +98,21 @@ export function parseHostMessage(input) {
           optionalText(item, 'type', 8);
           optionalText(item, 'copy', 4096);
           if (own(item, 'copyKind') && item.copyKind !== 'path' && item.copyKind !== 'link') fail('Invalid copy kind');
+        }
+      };
+      if (own(m, 'items')) rows(m.items);
+      // The conversation so far. Roles and text only; rows reuse the same bounded shape.
+      if (own(m, 'turns')) {
+        if (!Array.isArray(m.turns) || m.turns.length > 8) fail('Invalid turns');
+        for (const turn of m.turns) {
+          if (!turn || typeof turn !== 'object' || Array.isArray(turn) || Object.getPrototypeOf(turn) !== Object.prototype) fail('Invalid turn');
+          for (const key of Reflect.ownKeys(turn)) {
+            if (!['role', 'text', 'items'].includes(key)) fail('Unknown turn field');
+            if (!own(Object.getOwnPropertyDescriptor(turn, key) || {}, 'value')) fail('Message accessors are not permitted');
+          }
+          if (turn.role !== 'user' && turn.role !== 'assistant') fail('Invalid turn role');
+          text(turn.text, 'turns.text', 600);
+          if (own(turn, 'items')) rows(turn.items);
         }
       }
       if (own(m, 'listen')) bool(m.listen, 'listen');

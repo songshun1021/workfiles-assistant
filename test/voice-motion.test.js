@@ -120,8 +120,10 @@ test('the native frame and the page interior cannot drift apart', async () => {
   }
   // Density is the Host phase, not the viewport: a viewport breakpoint would re-flow the
   // interior halfway through the native growth.
-  const densityBlock = panel.slice(panel.indexOf('function render()'), panel.indexOf('function render()') + 400);
+  const densityBlock = panel.slice(panel.indexOf('function render()'), panel.indexOf('function render()') + 1200);
   assert.match(densityBlock, /panelDensity\(host\.phase\)/u);
+  // A conversation owns the tall shape for its whole life, including the next turn.
+  assert.match(densityBlock, /host\.turns\.length >= 2 \? 'full'/u);
   const densityLine = densityBlock.split('\n').find(line => line.includes('panel.dataset.density =')) || '';
   assert.doesNotMatch(densityLine, /innerWidth|innerHeight|clientHeight|matchMedia/u);
   assert.doesNotMatch(css, /@media\s*\(max-height/u);

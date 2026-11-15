@@ -316,6 +316,39 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   max-width: 52%;
 }
 
+/* ------------------------------------------------------------ transcript */
+/* A conversation takes over the card: the transcript scrolls, the live line stays under
+   it, and anything out of view is announced by the pill in the action row. */
+.voice-thread { display: none; min-height: 0; overflow: hidden auto; align-content: start; gap: 9px; padding: 2px 4px 4px 1px; scrollbar-width: thin; }
+.voice-panel.is-thread { align-items: stretch; --voice-orb-sized: 46px; }
+.voice-panel.is-thread .voice-thread { display: grid; }
+.voice-panel.is-thread .voice-content { align-content: start; min-height: 0; }
+.voice-panel.is-thread.is-settled .voice-title { display: none; }
+
+.voice-turn { display: grid; gap: 5px; min-width: 0; }
+.voice-turn.is-user { display: flex; gap: 8px; align-items: baseline; }
+.voice-turn-who { flex: 0 0 auto; font-size: 10.5px; color: var(--voice-muted); }
+.voice-turn-say { font-size: 13px; line-height: 1.45; color: var(--voice-ink-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.voice-turn.is-assistant .voice-turn-say { font-size: 13.5px; color: var(--voice-ink); }
+.voice-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
+
+/* Clipped edges fade; the pill states it and scrolls there. */
+.voice-thread[data-fade="top"] { mask: linear-gradient(transparent, black 16px); -webkit-mask: linear-gradient(transparent, black 16px); }
+.voice-thread[data-fade="bottom"] { mask: linear-gradient(black calc(100% - 18px), transparent); -webkit-mask: linear-gradient(black calc(100% - 18px), transparent); }
+.voice-thread[data-fade="both"] { mask: linear-gradient(transparent, black 16px, black calc(100% - 18px), transparent); -webkit-mask: linear-gradient(transparent, black 16px, black calc(100% - 18px), transparent); }
+
+.voice-more {
+  display: flex; align-items: center; gap: 3px;
+  padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--voice-ink) 16%, transparent); border-radius: 999px;
+  background: transparent; color: var(--voice-muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
+  transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease);
+}
+.voice-more[hidden] { display: none; }
+.voice-more:hover { background: color-mix(in srgb, var(--voice-ink) 8%, transparent); color: var(--voice-ink); }
+.voice-more .more-glyph { width: 11px; height: 11px; }
+.voice-more[data-edge="top"] { flex-direction: row-reverse; }
+.voice-more[data-edge="top"] .more-glyph { transform: rotate(180deg); }
+
 /* -------------------------------------------------------------- actions */
 .voice-acts { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; margin-left: auto; }
 

@@ -63,23 +63,50 @@ export function panelDensity(phase) {
   // grow per task instead of a window that bounces between sizes.
   return ['preparing', 'listening', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
 }
+/** The one row shape the panel renders, shared by the current result and the transcript. */
+export function panelRow(item) {
+  if (!item || typeof item.name !== 'string' || !item.name.trim()) return null;
+  const segments = typeof item.folder === 'string' ? item.folder.split('/').filter(Boolean) : [];
+  return {
+    name: item.name.slice(0, 140),
+    folderLabel: segments.slice(-2).join('/'),
+    modifiedAt: typeof item.modifiedAt === 'string' ? item.modifiedAt.slice(0, 64) : '',
+    type: typeof item.type === 'string' ? item.type.slice(0, 8) : '',
+    copy: typeof item.copy === 'string' ? item.copy.slice(0, 4096).trim() : '',
+    copyKind: item.copyKind === 'link' || item.copyKind === 'path' ? item.copyKind : '',
+  };
+}
+
+/** One bounded transcript for the panel: user text, then the assistant's reply and its rows.
+ * Anything outside those roles, over the cap, or empty is dropped rather than rendered. */
+export const MAX_THREAD_TURNS = 8;
+export const THREAD_TEXT_MAX = 600;
+export function selectPanelThread({ turns = [], max = MAX_THREAD_TURNS, rowMax = 5 } = {}) {
+  return (Array.isArray(turns) ? turns : []).slice(-Math.max(0, max)).flatMap(turn => {
+    if (!turn || (turn.role !== 'user' && turn.role !== 'assistant')) return [];
+    const text = typeof turn.text === 'string' ? turn.text.trim().slice(0, THREAD_TEXT_MAX) : '';
+    if (!text) return [];
+    const items = turn.role === 'assistant' && Array.isArray(turn.items)
+      ? turn.items.slice(0, rowMax).map(panelRow).filter(Boolean) : [];
+    return [{ role: turn.role, text, ...(items.length ? { items } : {}) }];
+  });
+}
+
+/** Which clipped edge has content behind it, and how to say it. Pure so the rule can be
+ * tested without a browser: below wins (reading is downward), history is the fallback. */
+export function threadOverflow({ above = 0, below = 0 } = {}) {
+  if (below > 0) return { edge: 'bottom', label: `还没看完 · 还有 ${below} 段` };
+  if (above > 0) return { edge: 'top', label: `上面还有 ${above} 段` };
+  return { edge: '', label: '' };
+}
+
 /** Rows the panel may show next to the spoken answer. Only successful results and
  * questions show them, at most `max` rows; the folder is shortened to its last two
  * segments and the timestamp stays an opaque string for the page to localise. */
 export function selectPanelItems({ phase = 'done', items = [], max = 3 } = {}) {
   if (phase !== 'done' && phase !== 'question') return [];
   const rows = Array.isArray(items) ? items : [];
-  return rows.filter(item => item && typeof item.name === 'string' && item.name.trim()).slice(0, Math.max(0, max)).map(item => {
-    const segments = typeof item.folder === 'string' ? item.folder.split('/').filter(Boolean) : [];
-    return {
-      name: item.name.slice(0, 140),
-      folderLabel: segments.slice(-2).join('/'),
-      modifiedAt: typeof item.modifiedAt === 'string' ? item.modifiedAt.slice(0, 64) : '',
-      type: typeof item.type === 'string' ? item.type.slice(0, 8) : '',
-      copy: typeof item.copy === 'string' ? item.copy.slice(0, 4096).trim() : '',
-      copyKind: item.copyKind === 'link' || item.copyKind === 'path' ? item.copyKind : '',
-    };
-  });
+  return rows.map(panelRow).filter(Boolean).slice(0, Math.max(0, max));
 }
 
 // Busy phases pulse a subtle indicator; reduced-motion users still get the text state.

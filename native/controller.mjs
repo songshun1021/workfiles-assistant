@@ -19,7 +19,8 @@ export function createNativeController({ send, onState = () => {}, onShow = () =
     if (!current) return Object.freeze({ activationId: null, phase: 'ready', message: '准备就绪', capture: false, listen: false, visible: false, canPrepare: false });
     const c = current;
     return Object.freeze({ activationId: c.id, phase: c.phase, capture: c.captureIntent && c.armed && c.visible, listen: c.listen && c.visible, visible: c.visible,
-      message: c.message, ...(c.detail === undefined ? {} : { detail: c.detail }), ...(c.items ? { items: c.items.map(item => ({ ...item })) } : {}), canPrepare: c.canPrepare,
+      message: c.message, ...(c.detail === undefined ? {} : { detail: c.detail }), ...(c.items ? { items: c.items.map(item => ({ ...item })) } : {}),
+      ...(c.turns ? { turns: c.turns.map(turn => ({ ...turn, ...(turn.items ? { items: turn.items.map(item => ({ ...item })) } : {}) })) } : {}), canPrepare: c.canPrepare,
       ...(c.progress === undefined ? {} : { progress: c.progress }), ...(c.signal ? { signal: c.signal, signalId: c.signalId } : {}) });
   }
   const publish = () => onState(snapshot());
@@ -51,9 +52,19 @@ export function createNativeController({ send, onState = () => {}, onShow = () =
     const c = current; c.armed = false; c.captureIntent = false; c.listen = false; c.submitAllowed = false; c.visible = false; c.signal = undefined;
     publish(); onHide({ activationId: c.id, reason });
   }
+  /** A conversation turn follows a settled one in the same visible window: retire the old
+   * activation quietly so the panel keeps its transcript instead of closing and reopening. */
+  function continueCurrent() {
+    const c = current;
+    if (!c || c.closed || !c.visible) return false;
+    if (busy(c.phase) || c.capturing || (c.listen && c.captureIntent)) return false;
+    c.armed = false; c.captureIntent = false; c.listen = false; c.submitAllowed = false; c.visible = false; c.signal = undefined;
+    onHide({ activationId: c.id, reason: 'continue' });
+    return true;
+  }
   function activate(id, source, capture) {
     if (seen.has(id)) invalid('STALE_ACTIVATION', 'Activation IDs cannot be reused');
-    hide('replacement');
+    if (!continueCurrent()) hide('replacement');
     seen.add(id);
     // Parent and native use fresh UUIDs. Bound long-lived replay bookkeeping;
     // current-ID checks still apply to every IPC/state/audio message.
@@ -100,6 +111,7 @@ export function createNativeController({ send, onState = () => {}, onShow = () =
         c.phase = m.phase; c.message = m.message ?? ''; c.detail = m.detail; c.canPrepare = m.canPrepare ?? false; c.progress = m.progress; c.signal = undefined;
         // Presentation rows live and die with the state that produced them.
         c.items = Array.isArray(m.items) && m.items.length ? m.items.map(item => ({ ...item })) : undefined;
+        c.turns = Array.isArray(m.turns) && m.turns.length ? m.turns.map(turn => ({ ...turn })) : undefined;
         // Questions are display-only. Answering requires a new shortcut/record gesture and UUID.
         c.listen = m.listen === true && m.phase === 'listening' && c.armed;
         c.captureIntent = c.armed && c.listen;

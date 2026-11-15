@@ -68,7 +68,7 @@ function harness(t, options = {}) {
   };
   const coordinator = createVoiceCoordinator({
     runtime: { async start(value) { callbacks = value; calls.starts.push(value.initial); return transport; } },
-    speech, session, timeoutMs: options.timeoutMs || 90000, now: options.now,
+    speech, session, timeoutMs: options.timeoutMs || 90000, now: options.now, conversationIdleMs: options.conversationIdleMs,
     captureCurrentContext: options.captureCurrentContext, releaseCurrentContext: options.releaseCurrentContext,
     contextCaptureMs: options.contextCaptureMs, shortcutConfigureMs: options.shortcutConfigureMs,
     getConfig: () => ({ providerId: 'sensevoice-local', language: 'auto', shortcut: 'CommandOrControl+Shift+Space' }),
@@ -764,4 +764,40 @@ test('the completion state carries those rows to the native helper', async t => 
   failing.audio('activation-error');
   await failing.coordinator.settled();
   assert.equal(failing.states().findLast(state => state.phase === 'error').items, undefined);
+});
+
+test('a conversation accumulates turns and keeps its window after a result', async t => {
+  const h = harness(t, { run: async (text) => ({ status: 'done', say: `收到：${text}`, items: [{ name: 'e-bot-panel', type: 'HTML', folder: 'ui-concepts/archive', modifiedAt: '2026-11-15T06:57:57.142Z' }] }) });
+  await h.activate('turn-1', true);
+  h.audio('turn-1');
+  await h.coordinator.settled();
+  const first = h.states().filter(state => state.phase === 'done').at(-1);
+  assert.equal(first.turns.length, 2, 'the user sentence and the answer are both on the card');
+  assert.equal(first.turns[0].role, 'user');
+  assert.equal(first.turns[1].role, 'assistant');
+  assert.equal(first.turns[1].items[0].type, 'HTML');
+  // A second turn in the same window appends instead of replacing.
+  await h.activate('turn-2', true);
+  h.audio('turn-2');
+  await h.coordinator.settled();
+  const second = h.states().filter(state => state.phase === 'done').at(-1);
+  assert.equal(second.turns.length, 4);
+  assert.equal(second.turns[2].role, 'user');
+  assert.ok(h.sent.some(message => message.type === 'state' && message.turns && message.turns.length === 4));
+});
+
+test('dismissing the panel clears the conversation, and a quiet spell closes it', async t => {
+  const h = harness(t, { conversationIdleMs: 30, run: async () => ({ status: 'done', say: '找到了。' }) });
+  await h.activate('idle-turn', true);
+  h.audio('idle-turn');
+  await h.coordinator.settled();
+  assert.equal(h.states().filter(state => state.phase === 'done').at(-1).turns.length, 2);
+  // No further turn: the Host closes the card itself after the idle budget.
+  await delay(60);
+  assert.equal(h.calls.cancels > 0 || h.sent.some(message => message.type === 'hide'), true, 'the idle timer retires the activation');
+  // A fresh activation after that starts a clean conversation.
+  await h.activate('later-turn', true);
+  h.audio('later-turn');
+  await h.coordinator.settled();
+  assert.equal(h.states().filter(state => state.phase === 'done').at(-1).turns.length, 2);
 });
