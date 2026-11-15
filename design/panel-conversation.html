@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作资料助手 · 连续对话 · 原型</title>
+<style>
+  :root{
+    --ease: cubic-bezier(.22,.61,.36,1);
+    --ease-out: cubic-bezier(.16,.84,.3,1);
+    --ease-pull: cubic-bezier(.45,.1,.7,.45);
+    font-family: "SF Pro Text", -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  *{ box-sizing:border-box }
+  html,body{ margin:0 }
+  body{ min-height:100vh; background:#0a0b0f; color:#e7eaf0; padding:18px 20px 28px; display:grid; gap:14px; align-content:start }
+
+  /* ---------------- page chrome (prototype only) ---------------- */
+  .hd{ display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap }
+  .hd h1{ margin:0; font-size:15px; font-weight:620; letter-spacing:-.01em }
+  .hd p{ margin:4px 0 0; font-size:12px; color:#858c99; max-width:74ch; line-height:1.55 }
+  .hd-act{ margin-left:auto; display:flex; gap:6px; flex-wrap:wrap }
+  .ghost{ font:inherit; font-size:11.5px; color:#b3bac6; background:#15171d; border:1px solid #272b33; border-radius:999px; padding:5px 11px; cursor:pointer; transition:all .16s var(--ease) }
+  .ghost:hover{ color:#fff; border-color:#454b56 }
+  .ghost[aria-pressed="true"]{ background:#e7eaf0; color:#0a0b0f; border-color:#e7eaf0 }
+  .seg{ display:flex; gap:2px; padding:2px; border-radius:999px; background:#15171d; border:1px solid #272b33 }
+  .seg button{ font:inherit; font-size:11.5px; color:#9aa1ad; background:transparent; border:0; border-radius:999px; padding:4px 11px; cursor:pointer; transition:all .16s var(--ease) }
+  .seg button:hover{ color:#fff }
+  .seg button[aria-pressed="true"]{ background:#e7eaf0; color:#0a0b0f }
+
+  .desk{ position:relative; height:470px; border-radius:22px; overflow:hidden; display:grid; place-items:center; padding:26px; box-shadow:0 0 0 1px rgb(255 255 255 / .06), 0 30px 60px -30px rgb(0 0 0 / .9) }
+  .desk[data-wall="light"]{ background:
+      radial-gradient(120% 80% at 16% 4%, #ffffff 0%, rgb(255 255 255 / 0) 55%),
+      radial-gradient(90% 70% at 84% 10%, #dfeafa 0%, rgb(223 234 250 / 0) 62%),
+      radial-gradient(120% 95% at 50% 104%, #c3d3e6 0%, rgb(195 211 230 / 0) 66%),
+      linear-gradient(152deg,#e7eff9 0%,#d3dfee 46%,#bccbdf 100%) }
+  .desk[data-wall="dark"]{ background:
+      radial-gradient(110% 80% at 18% 0%, #2a3346 0%, rgb(42 51 70 / 0) 58%),
+      radial-gradient(90% 70% at 80% 12%, #1d2a44 0%, rgb(29 42 68 / 0) 64%),
+      linear-gradient(158deg,#11151d 0%,#161c28 48%,#0d1118 100%) }
+  .desk .g{ position:absolute; border-radius:50%; filter:blur(2px); pointer-events:none }
+  .desk .g1{ width:380px; height:380px; right:-70px; top:-140px; background:radial-gradient(circle, rgb(120 170 255 / .5), transparent 68%) }
+  .desk .g2{ width:340px; height:340px; left:-90px; bottom:-140px; background:radial-gradient(circle, rgb(255 188 148 / .3), transparent 70%) }
+  .desk[data-wall="dark"] .g1{ background:radial-gradient(circle, rgb(72 112 190 / .5), transparent 68%) }
+  .desk[data-wall="dark"] .g2{ background:radial-gradient(circle, rgb(158 104 62 / .26), transparent 70%) }
+  .foot{ font-size:11.5px; color:#6f7686; line-height:1.6 }
+
+  /* ---------------- the floating card ---------------- */
+  .win{
+    --orb: 72px;
+    position:relative; z-index:2; width:620px;
+    display:grid; grid-template-rows:auto minmax(0,1fr) auto; row-gap:0;
+    padding:14px 16px 13px 15px; border-radius:19px;
+    background:var(--f-bg); border:1px solid var(--f-line); box-shadow:var(--f-shadow);
+    backdrop-filter:blur(16px) saturate(195%) brightness(1.03);
+    -webkit-backdrop-filter:blur(16px) saturate(195%) brightness(1.03);
+    color:var(--f-ink);
+    transition:height .42s var(--ease-out), width .34s var(--ease), opacity .3s var(--ease), transform .42s var(--ease-out), filter .3s var(--ease);
+    will-change:height;
+  }
+  .win[data-mode="idle"]{ height:124px }
+  .win[data-mode="thread"]{ height:var(--h, 200px); --orb:46px }
+  .win[data-visible="false"]{ opacity:0; transform:translateY(10px) scale(.985); filter:blur(3px) }
+  .desk[data-panel="light"] .win{
+    --f-bg:
+      radial-gradient(132% 62% at 50% -16%, rgb(255 255 255 / .62), rgb(255 255 255 / 0) 62%),
+      linear-gradient(162deg, rgb(255 255 255 / .42), rgb(255 255 255 / .14) 48%, rgb(255 255 255 / .3));
+    --f-line:rgb(255 255 255 / .4);
+    --f-ink:#0d1520; --f-ink-2:#31445c; --f-muted:#6b7d93;
+    --f-accent:#2f6fd0; --f-accent-soft:rgb(47 111 208 / .1);
+    --f-chip:rgb(13 21 32 / .07); --f-hair:rgb(13 21 32 / .13); --f-hover:rgb(13 21 32 / .05);
+    --f-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / .3), inset 0 1px 0 rgb(255 255 255 / 1),
+      inset 0 0 26px -4px rgb(255 255 255 / .55), inset 0 -26px 44px -30px rgb(47 111 208 / .38),
+      0 0 0 .5px rgb(17 40 76 / .13), 0 30px 56px -28px rgb(17 40 76 / .55), 0 10px 22px -16px rgb(17 40 76 / .34);
+  }
+  .desk[data-panel="dark"] .win{
+    --f-bg:
+      radial-gradient(132% 62% at 50% -16%, rgb(255 255 255 / .2), rgb(255 255 255 / 0) 62%),
+      linear-gradient(162deg, rgb(255 255 255 / .14), rgb(255 255 255 / .045) 48%, rgb(255 255 255 / .1));
+    --f-line:rgb(255 255 255 / .22);
+    --f-ink:#eef2f9; --f-ink-2:#c3cfe0; --f-muted:#95a2b6;
+    --f-accent:#78aeff; --f-accent-soft:rgb(120 174 255 / .18);
+    --f-chip:rgb(255 255 255 / .085); --f-hair:rgb(255 255 255 / .16); --f-hover:rgb(255 255 255 / .06);
+    --f-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / .16), inset 0 1px 0 rgb(255 255 255 / .38),
+      inset 0 0 26px -6px rgb(255 255 255 / .18), inset 0 -26px 44px -30px rgb(120 174 255 / .32),
+      0 30px 56px -26px rgb(0 0 0 / .85);
+  }
+  .win::before, .win::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; z-index:0 }
+  .win::before{
+    background:linear-gradient(115deg, transparent 28%, rgb(255 255 255 / .2) 44%, transparent 58%, rgb(255 255 255 / .09) 72%, transparent 84%);
+    background-size:280% 100%; mix-blend-mode:screen; opacity:.8; animation:sheen 13s linear infinite;
+  }
+  .win::after{
+    padding:1px;
+    background:linear-gradient(150deg, rgb(255 255 255 / .9) 0%, rgb(255 255 255 / .08) 18%, rgb(255 255 255 / .5) 38%, rgb(255 255 255 / .05) 62%, rgb(255 255 255 / .65) 84%, rgb(255 255 255 / .18) 100%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude;
+  }
+  .desk[data-panel="dark"] .win::after{
+    background:linear-gradient(150deg, rgb(255 255 255 / .62) 0%, rgb(255 255 255 / .04) 20%, rgb(255 255 255 / .3) 40%, rgb(255 255 255 / .03) 62%, rgb(255 255 255 / .4) 84%, rgb(255 255 255 / .08) 100%);
+  }
+  @keyframes sheen{ from{ background-position:0% 0 } to{ background-position:100% 0 } }
+  @media (prefers-reduced-motion: reduce){ .win::before{ animation:none } }
+
+  /* ---------------- header: the orb is the assistant, always in the same corner ---------------- */
+  .top{ position:relative; z-index:1; display:flex; align-items:center; gap:12px; min-height:var(--orb); transition:min-height .42s var(--ease-out) }
+  .orb-wrap{ position:relative; flex:0 0 auto; width:var(--orb); height:var(--orb); display:grid; place-items:center; transition:width .42s var(--ease-out), height .42s var(--ease-out) }
+  .orb-wrap canvas{ width:100%; height:100%; display:block }
+  .orb-wrap::before{
+    content:""; position:absolute; inset:-14%; border-radius:50%;
+    background:radial-gradient(circle, var(--f-accent-soft) 0%, transparent 70%);
+    opacity:var(--halo, .5); transition:opacity .5s var(--ease), transform .5s var(--ease);
+  }
+  .status{ min-width:0; flex:1 1 auto; display:grid; gap:3px; transition:opacity .3s var(--ease) }
+  .status b{ font-size:15.5px; font-weight:600; line-height:1.32; letter-spacing:-.012em; color:var(--f-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .status span{ font-size:12.5px; color:var(--f-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .win[data-mode="thread"] .status{ opacity:0; pointer-events:none; height:0; overflow:hidden }
+  .acts{ position:relative; z-index:1; margin-left:auto; display:flex; align-items:center; gap:4px; flex:0 0 auto }
+  .icon{ display:grid; place-items:center; width:26px; height:26px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--f-muted); cursor:pointer; transition:background .16s var(--ease), color .16s var(--ease) }
+  .icon:hover{ background:var(--f-hover); color:var(--f-ink) }
+  .icon svg{ width:15px; height:15px }
+
+  /* ---------------- thread ---------------- */
+  .thread{
+    position:relative; z-index:1; display:grid; gap:12px; align-content:end;
+    min-height:0; overflow:hidden auto; padding:4px 2px 10px 1px; margin:6px 0 0;
+    scrollbar-width:none; opacity:0; transition:opacity .3s var(--ease);
+  }
+  .thread::-webkit-scrollbar{ display:none }
+  .win[data-mode="thread"] .thread{ opacity:1 }
+  .thread[data-fade="top"]{ -webkit-mask:linear-gradient(#0000, #000 18px); mask:linear-gradient(#0000, #000 18px) }
+
+  .turn{ display:grid; gap:6px; min-width:0; animation:turn-in .34s var(--ease-out) both }
+  @keyframes turn-in{ from{ opacity:0; transform:translateY(6px) } to{ opacity:1; transform:none } }
+  .turn[data-age="older"]{ opacity:.62 }
+
+  .user{ display:grid; grid-template-columns:22px minmax(0,1fr); gap:8px; align-items:start }
+  .user .who{ font-size:10.5px; color:var(--f-muted); padding-top:3px; letter-spacing:.02em }
+  .user .say{ font-size:13.5px; line-height:1.45; color:var(--f-ink-2); overflow-wrap:anywhere }
+  .user .say::after{ content:""; display:inline-block; width:1.5px; height:14px; margin-left:2px; vertical-align:-2px; background:var(--f-accent); opacity:0 }
+  .user[data-live="true"] .say::after{ opacity:1; animation:caret 1s steps(2,end) infinite }
+  @keyframes caret{ 50%{ opacity:0 } }
+
+  .bot{ display:grid; gap:7px }
+  .bot .say{ font-size:14px; line-height:1.45; color:var(--f-ink); overflow-wrap:anywhere }
+  .bot .say[data-quiet="true"]{ color:var(--f-muted) }
+  .bot[data-live="true"] .say{ color:var(--f-ink-2) }
+
+  /* result rows: chip + name + place/time + copy */
+  .rows{ display:grid; gap:2px; margin:1px 0 0 }
+  .row{
+    display:flex; align-items:center; gap:8px; min-width:0; width:100%;
+    padding:3px 5px 3px 4px; border:0; border-radius:7px; background:transparent; color:inherit;
+    font:inherit; text-align:left; cursor:pointer;
+    transition:background .16s var(--ease), opacity .3s var(--ease);
+  }
+  .row:hover{ background:var(--f-hover) }
+  .row[data-opened="true"]{ cursor:default }
+  .row[data-opened="true"] .name{ color:var(--f-muted) }
+  .chip{
+    flex:0 0 auto; min-width:30px; padding:1px 4px; border-radius:4px; background:var(--f-chip);
+    color:var(--f-muted); font-size:9.5px; font-weight:600; letter-spacing:.045em; text-align:center; line-height:1.35;
+  }
+  .name{ flex:1 1 auto; min-width:0; font-size:12.5px; font-weight:500; color:var(--f-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  /* the short location/time never gets squeezed; the name ellipsizes instead */
+  .meta{ flex:0 0 auto; margin-left:auto; min-width:0; font-size:11.5px; color:var(--f-muted); font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:52%; padding-left:8px }
+  .row .copy{ flex:0 0 auto; display:grid; place-items:center; width:18px; height:18px; border:0; border-radius:5px; background:transparent; color:var(--f-muted); cursor:pointer; opacity:.5; transition:opacity .16s var(--ease), background .16s var(--ease), color .16s var(--ease) }
+  .row:hover .copy, .row:focus-within .copy{ opacity:1 }
+  .row .copy:hover{ background:var(--f-chip); color:var(--f-ink) }
+  .row .copy svg{ width:13px; height:13px }
+  .row .done{ flex:0 0 auto; display:none; color:var(--f-accent); font-size:11px; padding-left:2px }
+  .row[data-opened="true"] .done{ display:grid }
+  .row[data-opened="true"] .copy{ display:none }
+  .row .done svg{ width:13px; height:13px }
+
+  /* ---------------- composer: how the conversation continues ---------------- */
+  .compose{
+    position:relative; z-index:1; display:flex; align-items:center; gap:10px;
+    padding-top:10px; border-top:1px solid var(--f-hair); min-height:0;
+    opacity:0; transition:opacity .3s var(--ease);
+  }
+  .win[data-mode="thread"] .compose{ opacity:1 }
+  .win[data-mode="idle"] .compose{ display:none }
+  .mic{
+    display:flex; align-items:center; gap:7px; padding:5px 11px 5px 8px; border:1px solid var(--f-hair);
+    border-radius:999px; background:transparent; color:var(--f-ink-2); font:inherit; font-size:12px; cursor:pointer;
+    transition:background .16s var(--ease), border-color .16s var(--ease), color .16s var(--ease);
+  }
+  .mic:hover{ background:var(--f-hover); color:var(--f-ink) }
+  .mic .dot{ width:7px; height:7px; border-radius:50%; background:var(--f-accent); box-shadow:0 0 0 3px var(--f-accent-soft) }
+  .mic[data-state="listening"]{ border-color:var(--f-accent); color:var(--f-ink) }
+  .mic[data-state="listening"] .dot{ animation:pulse 1.2s var(--ease) infinite }
+  @keyframes pulse{ 50%{ box-shadow:0 0 0 6px var(--f-accent-soft) } }
+  .hint{ margin-left:auto; font-size:11.5px; color:var(--f-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .hint kbd{ font:inherit; font-size:11px; padding:1px 5px; border-radius:4px; background:var(--f-chip); color:var(--f-ink-2) }
+
+  @media (prefers-reduced-motion: reduce){ .turn{ animation:none } .mic .dot{ animation:none } }
+</style>
+</head>
+<body>
+
+<div class="hd">
+  <div>
+    <h1>语音小窗 · 连续对话原型</h1>
+    <p>同一张卡片，从「听你说话」一直走到「帮你打开」，中间不需要点按钮续一轮：结果之后麦克风还在，按键即可在同一段对话里接着说；每一轮你说的话、它说的话、找到的东西都留在卡片上。</p>
+  </div>
+  <div class="hd-act">
+    <button class="ghost" id="play" aria-pressed="false">播放演示</button>
+    <button class="ghost" id="step">下一步</button>
+    <button class="ghost" id="reset">重置</button>
+    <div class="seg" role="group" aria-label="外观">
+      <button data-wall="light" aria-pressed="true">浅色壁纸</button>
+      <button data-wall="dark">深色壁纸</button>
+    </div>
+  </div>
+</div>
+
+<div class="desk" id="desk" data-wall="light" data-panel="light">
+  <div class="g g1"></div><div class="g g2"></div>
+  <section class="win" id="win" data-mode="idle" data-visible="true" aria-label="工作资料语音助手">
+    <div class="top">
+      <div class="orb-wrap" id="orbWrap"><canvas id="orb"></canvas></div>
+      <div class="status" id="status">
+        <b id="statusTitle">说一句要找什么</b>
+        <span id="statusSub">例如：最近看过的关于环润讯的推文</span>
+      </div>
+      <div class="acts">
+        <button class="icon" title="收起" aria-label="收起">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="thread" id="thread" aria-live="polite"></div>
+
+    <div class="compose">
+      <button class="mic" id="mic" data-state="idle">
+        <span class="dot"></span><span id="micLabel">按 ⌘⇧Space 接着说</span>
+      </button>
+      <span class="hint" id="hint">或直接点这里；说“打开第一条”</span>
+    </div>
+  </section>
+</div>
+
+<div class="foot">
+  原型说明：卡片高度随对话增长（124 → 约 200 → 约 340）。真实插件里窗口尺寸由原生侧随之改变；这里先表达「一段对话」的形态。所有内容为演示数据。
+</div>
+
+<script>
+/* ---------------------------------------------------------------- orb
+   The same dot-matrix ball, reduced to the four states this flow needs. */
+const orb = document.getElementById('orb');
+const ctx = orb.getContext('2d');
+const BAYER = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,
+               3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21]
+  .map(value => (value + 0.5) / 64);
+const hash = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
+let orbState = 'idle';
+let orbSince = performance.now();
+const accents = { light: [47, 111, 208], dark: [120, 174, 255] };
+let accent = accents.light;
+let level = 0;
+
+function paint(now) {
+  const size = orb.clientWidth;
+  if (!size) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixels = Math.round(size * ratio);
+  if (orb.width !== pixels) { orb.width = pixels; orb.height = pixels; }
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  const R = size * 0.43, spacing = Math.max(3.6, size / 13.5), center = size / 2;
+  const t = (now - orbSince) / 1000;
+  const [r, g, b] = accent;
+  const dim = accent.map(channel => Math.round(channel + (255 - channel) * 0.62));
+  for (let gy = -R; gy <= R; gy += spacing) {
+    for (let gx = -R; gx <= R; gx += spacing) {
+      const gridDist = Math.hypot(gx, gy);
+      if (gridDist > R) continue;
+      let x = gx, y = gy, scale = 1, glow = 0;
+      if (orbState === 'listen') {
+        const pull = 0.1 * (0.65 + 0.35 * Math.sin(t * 3.4));
+        x = gx * (1 - pull); y = gy * (1 - pull);
+        glow = Math.exp(-Math.pow(gridDist / R, 2) * 2.4) * 0.8;
+        scale = 0.9;
+      } else if (orbState === 'think') {
+        const band = Math.exp(-Math.pow((gy - Math.sin(t * 1.6) * R * 0.85) / (R * 0.24), 2));
+        const sparkle = hash(gx, gy) > 0.88 ? Math.max(0, Math.sin(t * 5 + hash(gy, gx) * 12)) : 0;
+        x = gx + band * Math.sin(t * 9 + hash(gx, gy) * 8) * 0.9;
+        glow = 0.08 + band + sparkle * 0.6; scale = 0.74 + band * 0.6 + sparkle * 0.3;
+      } else if (orbState === 'hold') {
+        glow = 0.55 + 0.06 * Math.sin(t * 1.35); scale = 1 + 0.02 * Math.sin(t * 1.35);
+      } else {
+        glow = 0; scale = 0.8 + 0.05 * Math.sin(t * 0.9);
+      }
+      const dist = Math.hypot(x, y);
+      if (dist > R) continue;
+      const z = Math.sqrt(Math.max(0, R * R - dist * dist)) / R;
+      const nx = dist > 0 ? x / R : 0, ny = dist > 0 ? y / R : 0;
+      const light = Math.pow(Math.max(0, nx * -0.42 + ny * -0.52 + z * 0.74), 1.5);
+      const sphere = 0.3 + 0.7 * z;
+      const edge = Math.min(1, (R - dist) / (spacing * 0.4));
+      const radius = spacing * 0.44 * sphere * scale * (0.42 + 0.8 * light) * edge;
+      if (radius <= 0.18) continue;
+      const mix = Math.min(1, Math.max(0, 1 - light * 0.95) * 0.85 - glow * 0.45);
+      ctx.globalAlpha = Math.min(1, (0.16 + 0.84 * Math.max(0, Math.min(1, 0.3 * light + glow))) * (orbState === 'idle' ? 0.72 : 1));
+      ctx.fillStyle = `rgb(${Math.round(r + (dim[0] - r) * mix)} ${Math.round(g + (dim[1] - g) * mix)} ${Math.round(b + (dim[2] - b) * mix)})`;
+      ctx.beginPath(); ctx.arc(center + x, center + y, radius, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function frame(now) { paint(now); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+function setOrb(state) { if (state === orbState) return; orbState = state; orbSince = performance.now(); }
+
+/* ---------------------------------------------------------------- thread */
+const win = document.getElementById('win');
+const thread = document.getElementById('thread');
+const mic = document.getElementById('mic');
+const micLabel = document.getElementById('micLabel');
+const hint = document.getElementById('hint');
+const statusTitle = document.getElementById('statusTitle');
+const statusSub = document.getElementById('statusSub');
+
+const ICON_COPY = 'M9 9h9v11H9zM6 15H4V4h9v2';
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function copyGlyph() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.7');
+  svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', ICON_COPY); svg.append(path);
+  return svg;
+}
+
+/** One user turn. Newest is always at the bottom; older turns dim. */
+function addUser(text, { live = false } = {}) {
+  const turn = el('div', 'turn user');
+  if (live) turn.dataset.live = 'true';
+  turn.append(el('span', 'who', '你'));
+  const say = el('div', 'say', text);
+  turn.append(say);
+  thread.append(turn);
+  ageTurns();
+  scrollToEnd();
+  return turn;
+}
+function addBot(text, { quiet = false, live = false } = {}) {
+  const turn = el('div', 'turn bot');
+  if (live) turn.dataset.live = 'true';
+  const say = el('div', 'say', text);
+  if (quiet) say.dataset.quiet = 'true';
+  turn.append(say);
+  thread.append(turn);
+  ageTurns();
+  scrollToEnd();
+  return turn;
+}
+/** Result rows attach to the assistant turn they answer. */
+function addRows(turn, items) {
+  const rows = el('div', 'rows');
+  const list = el('div', 'rows');
+  list.style.display = 'grid';
+  for (const item of items) {
+    const row = el('button', 'row');
+    row.type = 'button';
+    row.title = '打开这一条';
+    row.append(el('span', 'chip', item.type));
+    row.append(el('span', 'name', item.name));
+    row.append(el('span', 'meta', item.meta));
+    const copy = el('button', 'copy');
+    copy.type = 'button';
+    copy.title = item.kind === 'link' ? '复制链接' : '复制路径';
+    copy.append(copyGlyph());
+    copy.addEventListener('click', event => { event.stopPropagation(); copy.dataset.state = 'copied'; copy.title = '已复制'; });
+    row.append(copy);
+    const done = el('span', 'done');
+    done.title = '已打开';
+    const tick = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    tick.setAttribute('viewBox', '0 0 24 24'); tick.setAttribute('fill', 'none');
+    tick.setAttribute('stroke', 'currentColor'); tick.setAttribute('stroke-width', '2');
+    tick.setAttribute('stroke-linecap', 'round'); tick.setAttribute('stroke-linejoin', 'round');
+    const tickPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tickPath.setAttribute('d', 'M5 13l4.5 4.5L19 6'); tick.append(tickPath);
+    done.append(tick);
+    row.append(done);
+    row.addEventListener('click', () => {
+      if (row.dataset.opened === 'true') return;
+      row.dataset.opened = 'true';
+      addBot(`已打开《${item.name}》。`);
+      setOrb('hold');
+      state.status = 'done';
+      mount();
+      schedule();
+    });
+    list.append(row);
+  }
+  rows.append(list);
+  turn.append(rows);
+  return rows;
+}
+function ageTurns() {
+  const turns = [...thread.querySelectorAll('.turn')];
+  turns.forEach((turn, index) => {
+    if (index === turns.length - 1) delete turn.dataset.age; else turn.dataset.age = 'older';
+  });
+}
+function scrollToEnd() { thread.scrollTop = thread.scrollHeight; }
+
+/* The card height follows the conversation, capped; the real window would follow it. */
+function fit() {
+  const mode = thread.children.length ? 'thread' : 'idle';
+  win.dataset.mode = mode;
+  if (mode === 'idle') { win.style.removeProperty('--h'); return; }
+  const style = getComputedStyle(win);
+  const box = node => node.getBoundingClientRect().height;
+  const chrome = box(win.querySelector('.top')) + box(win.querySelector('.compose'))
+    + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 6 + 10;
+  const turns = [...thread.children];
+  const content = turns.reduce((sum, node) => sum + box(node), 0) + 12 * Math.max(0, turns.length - 1);
+  const wanted = Math.min(380, Math.max(200, Math.round(chrome + content)));
+  win.style.setProperty('--h', `${wanted}px`);
+  requestAnimationFrame(() => {
+    const overflow = thread.scrollHeight > thread.clientHeight + 1;
+    thread.dataset.fade = overflow ? 'top' : 'off';
+    scrollToEnd();
+  });
+}
+
+/* ---------------------------------------------------------------- script */
+const TWEETS = [
+  { type: 'LINK', kind: 'link', name: 'X 上的 环润讯观察：“环润讯第三次架构调整：把模型调度和 Agent 运行时分开了”', meta: 'x.com · 09:12' },
+  { type: 'LINK', kind: 'link', name: 'X 上的 数据老李：“看完环润讯这份千卡集群复盘，最有价值的是失败任务那一段”', meta: 'x.com · 09:20' },
+];
+const steps = [];
+steps.push(async () => { state.status = 'listening'; setOrb('listen'); mic.dataset.state = 'listening'; micLabel.textContent = '我在听 · 停顿 1.1 秒自动提交'; hint.innerHTML = '说完自动提交；再按一次 <kbd>⌘⇧Space</kbd> 立即结束'; mount(); });
+steps.push(async () => {
+  const live = addUser('我最近看到几篇关于环润讯的推文，忘记标题了，帮我找一下。', { live: true });
+  mount();
+  await wait(900);
+  live.dataset.live = 'false';
+});
+steps.push(async () => { state.status = 'thinking'; setOrb('think'); mic.dataset.state = 'idle'; micLabel.textContent = '正在找…'; hint.textContent = ''; await wait(900); });
+steps.push(async () => {
+  const bot = addBot(`找到 2 条最近看过的：`);
+  addRows(bot, TWEETS);
+  state.status = 'found'; setOrb('hold');
+  mic.dataset.state = 'idle'; micLabel.textContent = '按 ⌘⇧Space 接着说';
+  hint.innerHTML = '麦克风已关；按键继续这段对话，或点一行直接打开';
+  mount();
+});
+steps.push(async () => { addUser('打开第一条。'); mount(); await wait(500); });
+steps.push(async () => {
+  const row = thread.querySelector('.row');
+  if (row && row.dataset.opened !== 'true') { row.dataset.opened = 'true'; }
+  addBot('已打开《环润讯第三次架构调整…》，第一条就是你要的。');
+  state.status = 'done';
+  micLabel.textContent = '按 ⌘⇧Space 接着说';
+  hint.innerHTML = '还可以说“在访达里显示它”，或点上面那行的复制按钮';
+  mount();
+});
+
+let cursor = 0;
+let playing = false;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const state = { status: 'idle' };
+
+function mount() {
+  statusTitle.textContent = { idle: '说一句要找什么', listening: '我在听', thinking: '正在找…', found: '', done: '' }[state.status] || '';
+  statusSub.textContent = state.status === 'idle' ? '例如：最近看过的关于环润讯的推文' : '';
+  fit();
+}
+function schedule() { /* a click can end the script early; nothing else to chain */ }
+
+async function playStep() {
+  if (cursor >= steps.length) return;
+  const step = steps[cursor++];
+  await step();
+  fit();
+}
+document.getElementById('step').addEventListener('click', () => { playStep(); });
+document.getElementById('play').addEventListener('click', async event => {
+  if (playing) { playing = false; event.currentTarget.setAttribute('aria-pressed', 'false'); return; }
+  playing = true; event.currentTarget.setAttribute('aria-pressed', 'true');
+  while (playing && cursor < steps.length) { await playStep(); await wait(650); }
+  playing = false; event.currentTarget.setAttribute('aria-pressed', 'false');
+});
+document.getElementById('reset').addEventListener('click', () => {
+  playing = false; cursor = 0; thread.replaceChildren(); state.status = 'idle';
+  setOrb('idle'); mic.dataset.state = 'idle'; micLabel.textContent = '按 ⌘⇧Space 接着说';
+  hint.innerHTML = '或直接点这里；说“打开第一条”';
+  document.getElementById('play').setAttribute('aria-pressed', 'false');
+  win.style.removeProperty('--h'); mount();
+});
+mic.addEventListener('click', () => {
+  if (mic.dataset.state === 'listening') { mic.dataset.state = 'idle'; micLabel.textContent = '按 ⌘⇧Space 接着说'; setOrb(state.status === 'found' || state.status === 'done' ? 'hold' : 'idle'); return; }
+  state.status = 'listening'; setOrb('listen'); mic.dataset.state = 'listening';
+  micLabel.textContent = '我在听 · 停顿 1.1 秒自动提交'; mount();
+});
+for (const button of document.querySelectorAll('[data-wall]')) {
+  button.addEventListener('click', () => {
+    const wall = button.dataset.wall;
+    document.getElementById('desk').dataset.wall = wall;
+    document.getElementById('desk').dataset.panel = wall;
+    accent = accents[wall];
+    for (const other of document.querySelectorAll('[data-wall]')) other.setAttribute('aria-pressed', String(other === button));
+  });
+}
+window.addEventListener('resize', fit);
+mount();
+</script>
+</body>
+</html>
