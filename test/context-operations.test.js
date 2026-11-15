@@ -229,3 +229,23 @@ test('a failing item mid-batch reports partial completion instead of claiming su
   assert.equal(batch.data.failure.code, 'STALE_CANDIDATE');
   assert.match(batch.data.message, /已处理 1 个/u);
 });
+
+test('the model-facing result drops identity and repeated location, the context keeps identity', async () => {
+  const { leanCandidate, slimCandidate } = await import('../lib/context.js');
+  const full = candidate();
+  assert.deepEqual(Object.keys(leanCandidate(full)).sort(), ['contentStatus', 'extension', 'id', 'modifiedAt', 'name', 'path', 'relativePath', 'snippet'].sort());
+  assert.deepEqual(Object.keys(slimCandidate(full)).sort(), ['_identity', 'contentStatus', 'extension', 'id', 'modifiedAt', 'name', 'path', 'relativePath', 'snippet'].sort());
+  // A context written before this change (with folder/root/bytes) still parses.
+  const { ContextSchema } = await import('../lib/context.js');
+  const legacy = { version: 1, candidates: [full], previousCandidates: [], recent: [], lastSearch: null, lastOpened: null, webCandidates: [], lastWebOpened: null, historyTurn: null, updatedAt: null };
+  assert.equal(ContextSchema.parse(legacy).candidates[0].folder, '/allowed');
+  // Through the real pipeline: the result is lean, the context can still open the id.
+  const env = harness(); const agent = { session: { id: 'lean' } };
+  const found = await env.call(agent, 'search', { query: '课题' });
+  const first = found.data.candidates[0];
+  assert.equal(Object.hasOwn(first, '_identity'), false);
+  assert.equal(Object.hasOwn(first, 'folder'), false);
+  assert.equal(env.current(agent.session).context.candidates[0]._identity.version, 'opaque');
+  assert.equal((await env.call(agent, 'open', { candidateId: first.id })).data.status, 'open_requested');
+  assert.equal(Object.hasOwn(env.current(agent.session).context.lastOpened.candidate, '_identity'), true);
+});

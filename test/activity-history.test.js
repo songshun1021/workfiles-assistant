@@ -76,7 +76,12 @@ test('document history creates fresh ordinary IDs, commits through the existing 
   const h = fixture(), result = await h.call(h.A, 'history', { detail: 'documents' });
   assert.equal(result.format, FORMAT); assert.equal(result.action, 'history');
   const selected = result.data.candidates[0]; assert.equal(selected.path, '/approved/课题报告.docx');
-  assert.equal(h.calls.opened.length, 0); assert.equal(selected._identity.version, 'fresh');
+  // The result is the lean view: no identity tuple and no repeated location.
+  assert.equal(Object.hasOwn(selected, '_identity'), false); assert.equal(Object.hasOwn(selected, 'root'), false);
+  assert.equal(Object.hasOwn(selected, 'folder'), false); assert.equal(Object.hasOwn(selected, 'bytes'), false);
+  // The context keeps the identity, because opening compares it before handing the file over.
+  assert.equal(h.get(h.A.session).context.candidates[0]._identity.version, 'fresh');
+  assert.equal(h.calls.opened.length, 0);
   assert.equal(findCandidate(h.get(h.A.session).context, selected.id).id, selected.id);
   assert.equal((await h.call(h.B, 'open', { candidateId: selected.id })).code, 'UNKNOWN_CANDIDATE');
   assert.equal((await h.call(h.A, 'open', { candidateId: selected.id })).data.status, 'open_requested');
