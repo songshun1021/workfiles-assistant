@@ -195,7 +195,7 @@ function shutdown(exitCode = 0) {
   try { controller?.dispose(); } catch { /* still exit and release renderer */ }
   if (window && !window.isDestroyed()) window.destroy();
   window = null; queued = []; process.stdin.pause();
-  for (const method of ['ready', 'audio', 'text', 'action', 'capture', 'clipboard']) ipcMain.removeHandler(`${prefix}${method}`);
+  for (const method of ['ready', 'audio', 'text', 'action', 'capture', 'clipboard', 'select']) ipcMain.removeHandler(`${prefix}${method}`);
   // app.exit kills owned renderer/GPU/utility children even with stdin open.
   const force = setTimeout(() => app.exit(exitCode), 200); force.unref();
   if (!process.stdout.destroyed) process.stdout.write('', () => app.exit(exitCode));
@@ -340,6 +340,18 @@ app.whenReady().then(async () => {
   // The panel may copy one string it is already showing (a path or a saved address).
   // Narrow on purpose: no read-back, no arbitrary clipboard access, bounded and only while
   // this activation's window is alive.
+  ipcMain.handle(`${prefix}select`, (event, payload) => {
+    if (exiting || !window || !isTrustedSender(event, window.webContents) || !controller.snapshot().visible) throw new Error('Untrusted native renderer');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Expected one native payload');
+    const keys = Reflect.ownKeys(payload);
+    if (keys.length !== 2 || !keys.includes('activationId') || !keys.includes('index')) throw new Error('Expected activationId and index');
+    const current = controller.snapshot();
+    if (payload.activationId !== current.activationId) throw new Error('Stale activation');
+    if (!Number.isInteger(payload.index) || payload.index < 0 || payload.index > 4) throw new Error('Invalid row index');
+    // The Host owns the mapping from index to a document; this process never sees the id.
+    send({ v: 1, type: 'select', activationId: current.activationId, index: payload.index });
+    return { status: 'sent' };
+  });
   ipcMain.handle(`${prefix}clipboard`, (event, payload) => {
     if (exiting || !window || !isTrustedSender(event, window.webContents) || !controller.snapshot().visible) throw new Error('Untrusted native renderer');
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Expected one native payload');

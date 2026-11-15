@@ -457,6 +457,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* A row that can be opened says so on hover; the send is an index, never a path. */
+.voice-item.is-clickable { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; padding: 3px 4px; border-radius: 7px; transition: background 0.16s var(--voice-ease); }
+.voice-item.is-clickable:hover { background: color-mix(in srgb, var(--voice-ink) 7%, transparent); }
+.voice-item.is-clickable:disabled { cursor: default; opacity: 0.55; }
+.voice-item.is-clickable[data-pending="1"] .voice-item-name { opacity: 0.6; }
+
 /* The native window is pulled into the orb on exit: the frame shrinks on the helper's
    clock, so the card keeps the size it had when the exit began and is scaled by exactly
    the factor the viewport lost. The whole surface then shrinks into the orb instead of

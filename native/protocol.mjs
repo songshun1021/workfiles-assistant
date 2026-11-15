@@ -154,6 +154,10 @@ export function parseHelperMessage(input) {
       fields(m, ['activationId', 'name']); id(m.activationId); if (!ACTIONS.includes(m.name)) fail('Invalid action'); break;
     case 'capture':
       fields(m, ['activationId', 'active']); id(m.activationId); bool(m.active, 'active'); break;
+    case 'select':
+      fields(m, ['activationId', 'index']); id(m.activationId);
+      if (!Number.isInteger(m.index) || m.index < 0 || m.index > 4) fail('Invalid row index');
+      break;
     case 'notice': case 'fatal':
       fields(m, ['code', 'message']); text(m.code, 'code', 64); text(m.message, 'message', 1000, { controls: true }); break;
     case 'closed': fields(m, [], ['activationId']); if (own(m, 'activationId')) id(m.activationId); break;

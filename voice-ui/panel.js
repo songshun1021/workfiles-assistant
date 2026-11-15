@@ -6,6 +6,8 @@ const bridge = window.workfilesVoice;
 const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
 // Copy is an optional bridge capability: without it the row simply shows no button.
 const canCopy = Boolean(hasBridge && typeof bridge.clipboard === 'function');
+// Row clicks are optional too: without the bridge method the rows stay plain text.
+const canSelect = Boolean(hasBridge && typeof bridge.select === 'function');
 const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content', 'items', 'thread', 'more', 'more-label'].map(id => [id, document.getElementById(id)]));
 const panel = document.querySelector('.voice-panel');
 const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
@@ -312,8 +314,16 @@ const FAILED_GLYPH = ['M7 7l10 10', 'M17 7L7 17'];
 
 // Rows are display-only: a type chip, the name, short location, and — when the bridge
 // supports it — a button that copies the exact path or saved link the Host supplied.
-function rowNode(row) {
-  const item = document.createElement('li'); item.className = 'voice-item';
+function rowNode(row, index = null) {
+  const clickable = index !== null && index >= 0 && canSelect;
+  const item = document.createElement(clickable ? 'button' : 'div');
+  item.className = clickable ? 'voice-item is-clickable' : 'voice-item';
+  if (clickable) {
+    item.type = 'button';
+    item.dataset.index = String(index);
+    item.title = '打开这一条';
+    item.addEventListener('click', () => requestRow(index, item));
+  }
   if (row.type) { const chip = document.createElement('span'); chip.className = 'voice-item-type'; chip.textContent = row.type; item.append(chip); }
   const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
   const meta = document.createElement('span'); meta.className = 'voice-item-meta';
@@ -323,13 +333,30 @@ function rowNode(row) {
   return item;
 }
 
+/** The renderer holds no id: it sends "row N of the state I am showing" and lets the Host
+ * resolve it through the ordinary candidate gate. */
+function requestRow(index, node) {
+  if (!canSelect || !host.activationId) return;
+  node.disabled = true;
+  node.dataset.pending = '1';
+  try {
+    Promise.resolve(bridge.select({ activationId: host.activationId, index })).catch(() => {
+      node.disabled = false;
+      delete node.dataset.pending;
+    });
+  } catch {
+    node.disabled = false;
+    delete node.dataset.pending;
+  }
+}
+
 function renderItems() {
   const rows = selectPanelItems({ phase: host.phase, items: host.items });
   const key = rows.map(row => [row.name, row.folderLabel, row.modifiedAt, row.type, row.copy].join('\u0001')).join('\u0002');
   if (key === itemsKey) return;
   itemsKey = key;
   if (!rows.length) { ui.items.replaceChildren(); ui.items.hidden = true; return; }
-  ui.items.replaceChildren(...rows.map(rowNode));
+  ui.items.replaceChildren(...rows.map((row, index) => rowNode(row, index)));
   ui.items.hidden = false;
 }
 
@@ -353,7 +380,8 @@ function renderThread() {
   if (key !== threadKey) {
     const atEnd = ui.thread.scrollHeight - ui.thread.scrollTop - ui.thread.clientHeight < 12;
     threadKey = key;
-    ui.thread.replaceChildren(...turns.map(turn => {
+    const lastAssistant = turns.map(turn => turn.role).lastIndexOf('assistant');
+    ui.thread.replaceChildren(...turns.map((turn, turnIndex) => {
       const node = document.createElement('div');
       node.className = `voice-turn is-${turn.role}`;
       if (turn.role === 'user') {
@@ -365,7 +393,9 @@ function renderThread() {
         node.append(say);
         if (turn.items && turn.items.length) {
           const list = document.createElement('ul'); list.className = 'voice-rows';
-          list.append(...turn.items.map(rowNode));
+          // Only the newest turn's rows are still resolvable Host-side; older ones are history.
+          const liveRows = turnIndex === lastAssistant;
+          list.append(...turn.items.map((row, index) => rowNode(row, liveRows ? index : null)));
           node.append(list);
         }
       }

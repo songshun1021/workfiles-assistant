@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('workfilesVoice', Object.freeze({
   capture: payload => ipcRenderer.invoke(`${prefix}capture`, payload),
   // Writes one bounded, already-displayed string. There is no read side and no path access.
   clipboard: payload => ipcRenderer.invoke(`${prefix}clipboard`, payload),
+  // "Open the row the user just clicked": an index, never an id or a path.
+  select: payload => ipcRenderer.invoke(`${prefix}select`, payload),
 }));

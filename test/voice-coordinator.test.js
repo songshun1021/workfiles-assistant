@@ -63,6 +63,7 @@ function harness(t, options = {}) {
   const session = {
     sessionId: 'voice-dedicated-fixture',
     run(text, request) { calls.runs.push({ text, ...request }); return options.run ? options.run(text, request) : Promise.resolve({ status: 'done', say: '已请求系统打开预算文档。' }); },
+    ...(options.openListed ? { openListed: (id, signal) => { calls.openListed = (calls.openListed || []).concat(id); return options.openListed(id, signal); } } : {}),
     cancel() { calls.cancels++; },
     async dispose() { calls.sessionDisposes++; },
   };
@@ -800,4 +801,34 @@ test('dismissing the panel clears the conversation, and a quiet spell closes it'
   h.audio('later-turn');
   await h.coordinator.settled();
   assert.equal(h.states().filter(state => state.phase === 'done').at(-1).turns.length, 2);
+});
+
+test('clicking a listed row opens exactly that candidate through the Host gate', async t => {
+  const items = [
+    { name: '环润讯观察', type: 'LINK', folder: 'x.com', modifiedAt: '2026-11-16T09:12:00.000Z', copy: 'https://x.com/a/1', copyKind: 'link' },
+    { name: '数据老李', type: 'LINK', folder: 'x.com', modifiedAt: '2026-11-16T09:20:00.000Z', copy: 'https://x.com/a/2', copyKind: 'link' },
+  ];
+  const opened = [];
+  const h = harness(t, {
+    run: async () => ({ status: 'done', say: '找到 2 条。', items, rowIds: ['wf-11111111-1111-4111-8111-111111111111', 'wf-22222222-2222-4222-8222-222222222222'] }),
+    openListed: async id => { opened.push(id); return { ok: true, data: { status: 'open_requested', candidate: { name: '环润讯观察' } } }; },
+  });
+  await h.activate('click-turn', true);
+  h.audio('click-turn');
+  await h.coordinator.settled();
+  const activation = h.states().filter(state => state.phase === 'done').at(-1);
+  // The renderer never received an id.
+  assert.equal(activation.turns[1].items.some(row => row.id !== undefined), false);
+  h.receive({ type: 'select', activationId: 'click-turn', index: 1 });
+  await h.coordinator.settled();
+  assert.deepEqual(opened, ['wf-22222222-2222-4222-8222-222222222222']);
+  const after = h.states().at(-1);
+  assert.equal(after.phase, 'done');
+  assert.match(after.message, /已打开/);
+  assert.equal(after.turns.at(-1).role, 'assistant');
+  // An index with no remembered id is a no-op, and a stale activation index is ignored.
+  const before = opened.length;
+  h.receive({ type: 'select', activationId: 'click-turn', index: 4 });
+  await h.coordinator.settled();
+  assert.equal(opened.length, before);
 });

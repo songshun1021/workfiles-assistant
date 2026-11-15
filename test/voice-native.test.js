@@ -290,7 +290,7 @@ test('local feature resource allowlist has no traversal, remote URLs, file URLs 
   assert.equal(CONTENT_SECURITY_POLICY.includes('unsafe-'), false);
 });
 
-test('sandbox preload exposes exactly six fixed methods and strips Electron event objects', async () => {
+test('sandbox preload exposes a fixed, small method set and strips Electron event objects', async () => {
   let exposed, listener; const calls = [], removed = [];
   const source = await fs.readFile(path.join(root, 'native/preload.cjs'), 'utf8');
   vm.runInNewContext(source, { require: name => {
@@ -298,13 +298,13 @@ test('sandbox preload exposes exactly six fixed methods and strips Electron even
     return { contextBridge: { exposeInMainWorld: (name, api) => { assert.equal(name, 'workfilesVoice'); exposed = api; } },
       ipcRenderer: { invoke: (channel, ...args) => { calls.push([channel, ...args]); return Promise.resolve(); }, on: (channel, fn) => { assert.equal(channel, 'workfiles-voice:state'); listener = fn; }, removeListener: (channel, fn) => removed.push([channel, fn]) } };
   } });
-  assert.deepEqual(Object.keys(exposed).sort(), ['action', 'audio', 'capture', 'clipboard', 'onState', 'ready', 'text'].sort());
+  assert.deepEqual(Object.keys(exposed).sort(), ['action', 'audio', 'capture', 'clipboard', 'onState', 'ready', 'select', 'text'].sort());
   const values = []; const dispose = exposed.onState((...args) => values.push(args));
   const value = { activationId: 'a', capture: false }; listener({ secretElectronEvent: true }, value);
   assert.deepEqual(values, [[value]]); dispose(); dispose(); assert.equal(removed.length, 1);
   await exposed.ready();
-  for (const method of ['audio', 'text', 'action', 'capture']) await exposed[method]({ activationId: 'a' });
-  assert.deepEqual(calls.map(call => call[0]), ['ready', 'audio', 'text', 'action', 'capture'].map(method => `workfiles-voice:${method}`));
+  for (const method of ['audio', 'text', 'action', 'capture', 'clipboard', 'select']) await exposed[method]({ activationId: 'a' });
+  assert.deepEqual(calls.map(call => call[0]), ['ready', 'audio', 'text', 'action', 'capture', 'clipboard', 'select'].map(method => `workfiles-voice:${method}`));
   assert.throws(() => exposed.onState(null));
 });
 
@@ -475,4 +475,20 @@ test('a settled panel continues in the same window instead of closing and reopen
   f.controller.shortcut();
   assert.equal(f.controller.snapshot().activationId, armed);
   assert.equal(f.controller.snapshot().signal, 'stop-submit');
+});
+
+test('a row click is forwarded as an index bound to the current activation', async () => {
+  const { parseHelperMessage, parseHostMessage } = await import('../native/protocol.mjs');
+  const select = parseHelperMessage({ v: 1, type: 'select', activationId: 'activation-a', index: 2 });
+  assert.equal(select.index, 2);
+  for (const message of [
+    { v: 1, type: 'select', activationId: 'activation-a', index: -1 },
+    { v: 1, type: 'select', activationId: 'activation-a', index: 5 },
+    { v: 1, type: 'select', activationId: 'activation-a', index: 1.5 },
+    { v: 1, type: 'select', activationId: 'activation-a', index: '1' },
+    { v: 1, type: 'select', activationId: 'activation-a', index: 1, path: '/a' },
+  ]) assert.throws(() => parseHelperMessage(message), undefined, JSON.stringify(message));
+  // The Host-side state that carries the rows has no id field for the renderer to use.
+  const state = parseHostMessage({ v: 1, type: 'state', activationId: 'activation-a', phase: 'done', items: [{ name: 'a', type: 'PPT' }] });
+  assert.equal(Object.hasOwn(state.items[0], 'id'), false);
 });
