@@ -260,7 +260,43 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   font-size: 12px;
   color: var(--voice-muted);
 }
-.voice-item { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.voice-item { display: flex; gap: 8px; align-items: center; min-width: 0; }
+/* Type chip instead of a heavy ".pptx" suffix: two to four characters, quiet, always the
+   same width, so a column of rows lines up. */
+.voice-item-type {
+  flex: 0 0 auto;
+  min-width: 26px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--voice-ink) 9%, transparent);
+  color: var(--voice-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.35;
+  font-variant-numeric: normal;
+}
+.voice-item-copy {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--voice-muted);
+  transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease);
+}
+.voice-item-copy svg { width: 13px; height: 13px; }
+.voice-item-copy:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--voice-ink) 9%, transparent);
+  color: var(--voice-ink);
+}
+.voice-item-copy[data-state="copied"] { color: var(--voice-pin); }
+.voice-item-copy[data-state="failed"] { color: var(--voice-error); }
 .voice-item-name {
   flex: 0 1 auto;
   min-width: 0;
@@ -271,13 +307,13 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   white-space: nowrap;
 }
 .voice-item-meta {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 55%;
+  max-width: 52%;
 }
 
 /* -------------------------------------------------------------- actions */

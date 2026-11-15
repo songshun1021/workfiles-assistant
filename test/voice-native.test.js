@@ -298,7 +298,7 @@ test('sandbox preload exposes exactly six fixed methods and strips Electron even
     return { contextBridge: { exposeInMainWorld: (name, api) => { assert.equal(name, 'workfilesVoice'); exposed = api; } },
       ipcRenderer: { invoke: (channel, ...args) => { calls.push([channel, ...args]); return Promise.resolve(); }, on: (channel, fn) => { assert.equal(channel, 'workfiles-voice:state'); listener = fn; }, removeListener: (channel, fn) => removed.push([channel, fn]) } };
   } });
-  assert.deepEqual(Object.keys(exposed).sort(), ['action', 'audio', 'capture', 'onState', 'ready', 'text'].sort());
+  assert.deepEqual(Object.keys(exposed).sort(), ['action', 'audio', 'capture', 'clipboard', 'onState', 'ready', 'text'].sort());
   const values = []; const dispose = exposed.onState((...args) => values.push(args));
   const value = { activationId: 'a', capture: false }; listener({ secretElectronEvent: true }, value);
   assert.deepEqual(values, [[value]]); dispose(); dispose(); assert.equal(removed.length, 1);
@@ -419,4 +419,22 @@ test('readonly peek preserves every visible activation including active micropho
     assert.equal(f.events.filter(event => event.type === 'activated').length, count, phase);
     assert.equal(f.controller.mayCapture(), phase === 'listening', phase);
   }
+});
+
+test('presentation rows may carry a type chip and a copy string, and nothing else', async () => {
+  const { parseHostMessage } = await import('../native/protocol.mjs');
+  const base = { v: 1, type: 'state', activationId: 'activation-a', phase: 'done' };
+  const accepted = parseHostMessage({ ...base, items: [{ name: 'e-bot-panel', type: 'HTML', copy: '/Users/s/稿子.html', copyKind: 'path' }, { name: 'X 上的某条推文', type: 'LINK', copy: 'https://x.com/a/1', copyKind: 'link' }] });
+  assert.equal(accepted.items.length, 2);
+  assert.equal(accepted.items[0].type, 'HTML');
+  // Display data only: no ids, no paths beyond the copy string, bounded count and size.
+  for (const items of [
+    [{ name: '' }],
+    [{ name: 'x', id: 'wf-1' }],
+    [{ name: 'x', copyKind: 'open' }],
+    [{ name: 'x', copy: 1 }],
+    [{ name: 'x'.repeat(301) }],
+    [{ name: 'x', type: 'HTMLHTMLHTML' }],
+    Array.from({ length: 6 }, () => ({ name: 'x' })),
+  ]) assert.throws(() => parseHostMessage({ ...base, items }), undefined, JSON.stringify(items).slice(0, 80));
 });

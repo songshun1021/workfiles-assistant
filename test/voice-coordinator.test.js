@@ -733,7 +733,9 @@ test('a finished search publishes bounded display rows and never an open capabil
   ] } } }];
   const rows = presentationItems(outcomes);
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].name, 'e-bot-panel.html');
+  assert.equal(rows[0].name, 'e-bot-panel');
+  assert.equal(rows[0].type, 'HTML');
+  assert.equal(rows[0].copyKind, 'path', 'only a display string is copied, never an id');
   assert.equal(Object.hasOwn(rows[0], 'id'), false, 'no open capability may cross to the renderer');
   assert.equal(Object.hasOwn(rows[0], 'path'), false);
   const projected = selectPanelItems({ phase: 'done', items: rows });

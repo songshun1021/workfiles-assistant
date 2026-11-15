@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('workfilesVoice', Object.freeze({
   text: payload => ipcRenderer.invoke(`${prefix}text`, payload),
   action: payload => ipcRenderer.invoke(`${prefix}action`, payload),
   capture: payload => ipcRenderer.invoke(`${prefix}capture`, payload),
+  // Writes one bounded, already-displayed string. There is no read side and no path access.
+  clipboard: payload => ipcRenderer.invoke(`${prefix}clipboard`, payload),
 }));

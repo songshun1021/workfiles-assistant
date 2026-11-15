@@ -75,6 +75,9 @@ export function selectPanelItems({ phase = 'done', items = [], max = 3 } = {}) {
       name: item.name.slice(0, 140),
       folderLabel: segments.slice(-2).join('/'),
       modifiedAt: typeof item.modifiedAt === 'string' ? item.modifiedAt.slice(0, 64) : '',
+      type: typeof item.type === 'string' ? item.type.slice(0, 8) : '',
+      copy: typeof item.copy === 'string' ? item.copy.slice(0, 4096).trim() : '',
+      copyKind: item.copyKind === 'link' || item.copyKind === 'path' ? item.copyKind : '',
     };
   });
 }

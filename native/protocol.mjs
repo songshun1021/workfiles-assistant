@@ -87,12 +87,17 @@ export function parseHostMessage(input) {
         for (const item of m.items) {
           if (!item || typeof item !== 'object' || Array.isArray(item) || Object.getPrototypeOf(item) !== Object.prototype) fail('Invalid items');
           for (const key of Reflect.ownKeys(item)) {
-            if (!['name', 'folder', 'modifiedAt'].includes(key)) fail('Unknown item field');
+            if (!['name', 'folder', 'modifiedAt', 'type', 'copy', 'copyKind'].includes(key)) fail('Unknown item field');
             if (!own(Object.getOwnPropertyDescriptor(item, key) || {}, 'value')) fail('Message accessors are not permitted');
           }
           text(item.name, 'items.name', 300);
           optionalText(item, 'folder', 4096);
           optionalText(item, 'modifiedAt', 64);
+          // Presentation only: a short type chip and the exact text a copy button writes.
+          // Neither is a capability — the renderer can display them, not open anything.
+          optionalText(item, 'type', 8);
+          optionalText(item, 'copy', 4096);
+          if (own(item, 'copyKind') && item.copyKind !== 'path' && item.copyKind !== 'link') fail('Invalid copy kind');
         }
       }
       if (own(m, 'listen')) bool(m.listen, 'listen');

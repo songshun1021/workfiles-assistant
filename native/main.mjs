@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, protocol, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, protocol, screen, session } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -180,7 +180,7 @@ function shutdown(exitCode = 0) {
   try { controller?.dispose(); } catch { /* still exit and release renderer */ }
   if (window && !window.isDestroyed()) window.destroy();
   window = null; queued = []; process.stdin.pause();
-  for (const method of ['ready', 'audio', 'text', 'action', 'capture']) ipcMain.removeHandler(`${prefix}${method}`);
+  for (const method of ['ready', 'audio', 'text', 'action', 'capture', 'clipboard']) ipcMain.removeHandler(`${prefix}${method}`);
   // app.exit kills owned renderer/GPU/utility children even with stdin open.
   const force = setTimeout(() => app.exit(exitCode), 200); force.unref();
   if (!process.stdout.destroyed) process.stdout.write('', () => app.exit(exitCode));
@@ -318,6 +318,19 @@ app.whenReady().then(async () => {
     onState: publish,
     onHide: ({ activationId, reason }) => reason === 'replacement' ? destroyWindow(activationId) : absorbWindow(activationId),
     onShow: options => { ensureWindow(options).catch(() => { if (!exiting && controller.snapshot().visible && controller.snapshot().activationId === options.activationId) fatal('PANEL_LOAD_FAILED', 'The real native voice panel could not be loaded.'); }); },
+  });
+  // The panel may copy one string it is already showing (a path or a saved address).
+  // Narrow on purpose: no read-back, no arbitrary clipboard access, bounded and only while
+  // this activation's window is alive.
+  ipcMain.handle(`${prefix}clipboard`, (event, payload) => {
+    if (exiting || !window || !isTrustedSender(event, window.webContents) || !controller.snapshot().visible) throw new Error('Untrusted native renderer');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Expected one native payload');
+    const keys = Reflect.ownKeys(payload);
+    if (keys.length !== 1 || keys[0] !== 'text') throw new Error('Expected exactly one text field');
+    const text = payload.text;
+    if (typeof text !== 'string' || !text.length || text.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) throw new Error('Invalid clipboard text');
+    clipboard.writeText(text);
+    return { status: 'copied', characters: text.length };
   });
   for (const method of ['ready', 'audio', 'text', 'action', 'capture']) {
     ipcMain.handle(`${prefix}${method}`, (event, ...args) => {

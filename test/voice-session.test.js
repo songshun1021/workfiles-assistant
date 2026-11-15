@@ -557,7 +557,7 @@ test('disposing during binding cancels admission, releases the cue and joins the
 });
 
 test('the completion sentence names what was opened, and the card can list it', async () => {
-  const file = { name: 'e-bot-panel.html', folder: '/Users/s/Documents/DSHarness/ui-concepts/archive', relativePath: 'DSHarness/ui-concepts/archive/e-bot-panel.html', modifiedAt: '2026-11-15T06:57:57.142Z' };
+  const file = { name: 'e-bot-panel.html', path: '/Users/s/Documents/DSHarness/ui-concepts/archive/e-bot-panel.html', extension: 'html', folder: '/Users/s/Documents/DSHarness/ui-concepts/archive', relativePath: 'DSHarness/ui-concepts/archive/e-bot-panel.html', modifiedAt: '2026-11-15T06:57:57.142Z' };
   const page = { name: '(1) X 上的 hidecloud：“Four months after we launched Manus…” / X - 已固定 - Microsoft Edge', url: 'https://x.com/hidecloud/status/1', app: { id: 'com.microsoft.edge', name: 'Microsoft Edge' }, observedAt: '2026-11-15T07:01:24.370Z' };
   const env = fixture({ completion: { delivery: delivery('done', '已打开。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'open_requested', candidate: file } } }] } });
   const voice = createVoiceSession({ ctx: env.ctx });
@@ -565,8 +565,14 @@ test('the completion sentence names what was opened, and the card can list it', 
   assert.equal(result.status, 'done');
   assert.equal(result.say, '已打开《e-bot-panel.html》。');
   assert.equal(result.items.length, 1);
-  assert.deepEqual(Object.keys(result.items[0]), ['name', 'folder', 'modifiedAt']);
+  // The chip carries the type, so the row name drops its extension; the copy button gets
+  // the exact absolute path.
+  assert.deepEqual(Object.keys(result.items[0]), ['name', 'type', 'folder', 'modifiedAt', 'copy', 'copyKind']);
+  assert.equal(result.items[0].name, 'e-bot-panel');
+  assert.equal(result.items[0].type, 'HTML');
   assert.equal(result.items[0].folder, 'ui-concepts/archive');
+  assert.equal(result.items[0].copy, file.path);
+  assert.equal(result.items[0].copyKind, 'path');
   await voice.dispose();
 
   // An observed page shows its title without the browser suffix, and its app as the label.
@@ -577,6 +583,9 @@ test('the completion sentence names what was opened, and the card can list it', 
   assert.ok(Array.from(opened.say).length <= 121, 'the sentence stays bounded');
   assert.ok(!opened.say.includes('Microsoft Edge'), 'the app suffix is dropped from the title');
   assert.equal(opened.items[0].folder, 'Microsoft Edge');
+  assert.equal(opened.items[0].type, 'LINK');
+  assert.equal(opened.items[0].copy, page.url);
+  assert.equal(opened.items[0].copyKind, 'link');
   await webVoice.dispose();
 
   // Many items: say how many and name the first; a partial batch admits the failure.

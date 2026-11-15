@@ -4,6 +4,8 @@ import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFe
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
 const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
+// Copy is an optional bridge capability: without it the row simply shows no button.
+const canCopy = Boolean(hasBridge && typeof bridge.clipboard === 'function');
 const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content', 'items'].map(id => [id, document.getElementById(id)]));
 const panel = document.querySelector('.voice-panel');
 const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
@@ -285,23 +287,85 @@ function shortStamp(value) {
 }
 
 let itemsKey = '';
-// Rows are display-only: names, folders and times, never ids. Rebuilt only when the
-// projection actually changes, because render() runs on every state tick.
+// 16px geometry for the row actions. Shapes only: no icon font, no image request, so the
+// page keeps its single-surface CSP and stays crisp at any backing scale.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function glyph(paths, { fill = false } = {}) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('fill', fill ? 'currentColor' : 'none');
+  svg.setAttribute('stroke', fill ? 'none' : 'currentColor');
+  svg.setAttribute('stroke-width', '1.7');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+const COPY_GLYPH = ['M9 9h9v11H9z', 'M6 15H4V4h9v2'];
+const COPIED_GLYPH = ['M5 13l4.5 4.5L19 6'];
+const FAILED_GLYPH = ['M7 7l10 10', 'M17 7L7 17'];
+
+// Rows are display-only: a type chip, the name, short location, and — when the bridge
+// supports it — a button that copies the exact path or saved link the Host supplied.
 function renderItems() {
   const rows = selectPanelItems({ phase: host.phase, items: host.items });
-  const key = rows.map(row => `${row.name}\u0001${row.folderLabel}\u0001${row.modifiedAt}`).join('\u0002');
+  const key = rows.map(row => [row.name, row.folderLabel, row.modifiedAt, row.type, row.copy].join('\u0001')).join('\u0002');
   if (key === itemsKey) return;
   itemsKey = key;
   if (!rows.length) { ui.items.replaceChildren(); ui.items.hidden = true; return; }
   ui.items.replaceChildren(...rows.map(row => {
     const item = document.createElement('li'); item.className = 'voice-item';
+    if (row.type) {
+      const chip = document.createElement('span'); chip.className = 'voice-item-type'; chip.textContent = row.type;
+      item.append(chip);
+    }
     const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
     const meta = document.createElement('span'); meta.className = 'voice-item-meta';
     meta.textContent = [row.folderLabel, shortStamp(row.modifiedAt)].filter(Boolean).join(' · ');
     item.append(name, meta);
+    if (canCopy && row.copy) item.append(copyButton(row));
     return item;
   }));
   ui.items.hidden = false;
+}
+
+function copyButton(row) {
+  const isLink = row.copyKind === 'link';
+  const label = isLink ? '复制链接' : '复制路径';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'voice-item-copy';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  const draw = (paths, fill) => button.replaceChildren(glyph(paths, { fill }));
+  draw(COPY_GLYPH);
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    const finish = (paths, state, message, delay) => {
+      draw(paths, state === 'copied');
+      button.dataset.state = state;
+      button.title = message;
+      window.setTimeout(() => {
+        button.dataset.state = '';
+        button.disabled = false;
+        button.title = label;
+        draw(COPY_GLYPH);
+      }, delay);
+    };
+    try {
+      await Promise.resolve(bridge.clipboard({ text: row.copy }));
+      finish(COPIED_GLYPH, 'copied', isLink ? '链接已复制' : '路径已复制', 1200);
+    } catch {
+      finish(FAILED_GLYPH, 'failed', '复制失败', 1600);
+    }
+  });
+  return button;
 }
 
 function showText(node, text) {
@@ -582,6 +646,9 @@ function normalizeState(value) {
       name: item.name.slice(0, 300),
       ...(typeof item.folder === 'string' ? { folder: item.folder.slice(0, 4096) } : {}),
       ...(typeof item.modifiedAt === 'string' ? { modifiedAt: item.modifiedAt.slice(0, 64) } : {}),
+      ...(typeof item.type === 'string' ? { type: item.type.slice(0, 8) } : {}),
+      ...(typeof item.copy === 'string' ? { copy: item.copy.slice(0, 4096) } : {}),
+      ...(item.copyKind === 'link' || item.copyKind === 'path' ? { copyKind: item.copyKind } : {}),
     }] : []) : [],
     progress: Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 1 ? value.progress : undefined,
     signal: value.signal === 'stop-submit' ? value.signal : undefined,
