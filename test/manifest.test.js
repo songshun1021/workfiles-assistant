@@ -65,7 +65,13 @@ test('native definitions validate arguments with Zod before invoking an operatio
   assert.equal(calls, 0);
   const value = await search.execute({ query: '课题', content: false }, {});
   assert.equal(value.args.content, false); assert.equal(calls, 1);
-  assert.equal(open.parameters.additionalProperties, false); assert.deepEqual(open.parameters.required, ['candidateId']);
+  assert.equal(open.parameters.additionalProperties, false);
+  assert.equal(open.parameters.required, undefined, 'either form may be used, so nothing is unconditionally required');
+  // "Exactly one of the two" is enforced before the operation is invoked.
+  const beforeFormCheck = calls;
+  await assert.rejects(open.execute({}, {}), { code: 'INVALID_ARGS' });
+  await assert.rejects(open.execute({ candidateId: 'wf-00000000-0000-4000-8000-000000000000', candidateIds: ['wf-00000000-0000-4000-8000-000000000000', 'wf-11111111-1111-4111-8111-111111111111'] }, {}), { code: 'INVALID_ARGS' });
+  assert.equal(calls, beforeFormCheck, 'a malformed open never reaches the operation');
 });
 test('Client mounts the global Human surface before nested namespace injection and owns locale cleanup', async () => {
   const source = await fs.readFile(path.join(root, 'client.js'), 'utf8');

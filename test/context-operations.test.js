@@ -155,7 +155,7 @@ test('a canceled queued operation never reaches its body', async () => {
 test('the agent has no tool to grant folders, change policy or open arbitrary paths', () => {
   const definitions = createToolDefinitions(async () => ({}));
   assert.deepEqual(definitions.map(value => value.name), ['workfiles_search', 'workfiles_inspect', 'workfiles_open', 'workfiles_context', 'workfiles_history']);
-  assert.deepEqual(Object.keys(definitions.find(value => value.name === 'workfiles_open').parameters.properties), ['candidateId', 'revealInFinder']);
+  assert.deepEqual(Object.keys(definitions.find(value => value.name === 'workfiles_open').parameters.properties), ['candidateId', 'candidateIds', 'revealInFinder']);
   // Folder requests reuse the candidate gate: still exactly five tools, no path argument.
   assert.equal(definitions.length, 5);
   assert.ok(!Object.hasOwn(definitions.find(value => value.name === 'workfiles_open').parameters.properties, 'path'));
@@ -177,4 +177,55 @@ test('a folder request is served by the same candidate gate, never by a path arg
   assert.equal(Object.hasOwn(open.parameters.properties, 'path'), false);
   assert.equal(Object.hasOwn(open.parameters.properties, 'folder'), false);
   assert.match(WORKFILES_PROMPT, /revealInFinder/u);
+});
+
+test('several candidates open in one step, validated before anything is opened', async () => {
+  const env = harness(); const agent = { session: { id: 'batch' } };
+  const found = await env.call(agent, 'search', { query: '课题' });
+  const [first, second] = found.data.candidates;
+  const batch = await env.call(agent, 'open', { candidateIds: [first.id, second.id] });
+  assert.equal(batch.ok, true);
+  assert.equal(batch.data.status, 'open_requested');
+  assert.equal(batch.data.results.length, 2);
+  assert.deepEqual(batch.data.results.map(row => row.name), [first.name, second.name]);
+  assert.deepEqual(env.opens.map(item => item.id), [first.id, second.id], 'both ids are opened in order');
+  // An unknown id anywhere in the batch opens nothing at all.
+  const before = env.opens.length;
+  const rejected = await env.call(agent, 'open', { candidateIds: [first.id, `wf-${randomUUID()}`] });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, 'UNKNOWN_CANDIDATE');
+  assert.equal(env.opens.length, before, 'no partial side effects');
+  // One form at a time.
+  const mixed = await env.call(agent, 'open', { candidateId: first.id, candidateIds: [first.id, second.id] });
+  assert.equal(mixed.ok, false); assert.equal(mixed.code, 'INVALID_OPEN');
+});
+
+test('a batch reveal shows every file in Finder and never launches the default app', async () => {
+  const env = harness(); const agent = { session: { id: 'batch-reveal' } };
+  const found = await env.call(agent, 'search', { query: '课题' });
+  const reveals = [];
+  env.engine.reveal = async value => { reveals.push(value); return { status: 'reveal_requested', candidate: value, folder: value.folder, requestedAt: '2026-11-12T01:00:00Z', finderVisibleConfirmed: false }; };
+  const batch = await env.call(agent, 'open', { candidateIds: found.data.candidates.map(candidate => candidate.id), revealInFinder: true });
+  assert.equal(batch.ok, true);
+  assert.equal(batch.data.status, 'reveal_requested');
+  assert.equal(reveals.length, 2);
+  assert.equal(env.opens.length, 0);
+});
+
+test('a failing item mid-batch reports partial completion instead of claiming success', async () => {
+  const env = harness(); const agent = { session: { id: 'batch-partial' } };
+  const found = await env.call(agent, 'search', { query: '课题' });
+  const [first, second] = found.data.candidates;
+  let calls = 0;
+  env.engine.open = async value => {
+    calls++;
+    if (calls > 1) throw Object.assign(new Error('文件在查找后发生了变化'), { code: 'STALE_CANDIDATE' });
+    return { status: 'open_requested', candidate: value, requestedAt: '2026-11-12T01:00:00Z', documentVisibleConfirmed: false };
+  };
+  const batch = await env.call(agent, 'open', { candidateIds: [first.id, second.id] });
+  assert.equal(batch.ok, true);
+  assert.equal(batch.data.status, 'partial');
+  assert.equal(batch.data.completed, 1);
+  assert.equal(batch.data.failure.code, 'STALE_CANDIDATE');
+  assert.match(batch.data.message, /已处理 1 个/u);
 });
