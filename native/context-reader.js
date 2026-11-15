@@ -15,7 +15,7 @@ var KNOWN_APPS = [
   { id: 'com.kingsoft.wpsoffice.mac', name: 'WPS Office' }
 ];
 // Keep in sync with lib/documents.js FILE_KINDS. Only file metadata is inspected here.
-var EXTENSIONS = ['doc', 'docx', 'ppt', 'pptx', 'rtf', 'xlsx', 'xls', 'csv', 'pdf', 'txt', 'md'];
+var EXTENSIONS = ['doc', 'docx', 'ppt', 'pptx', 'rtf', 'xlsx', 'xls', 'csv', 'pdf', 'txt', 'md', 'html', 'htm'];
 var MAX_APPLICATIONS = 128, MAX_REQUEST_BYTES = 131072, MAX_OUTPUT_BYTES = 32768;
 var DISCOVERY_SCAN_LIMIT = 1024, DISCOVERY_MS = 900;
 var AX_TOTAL_MS = 900, AX_TIMEOUT_SECONDS = 0.3;

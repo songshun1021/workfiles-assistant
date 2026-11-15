@@ -216,3 +216,22 @@ test('revealing a candidate selects it in Finder without ever accepting a folder
   await assert.rejects(engine.reveal({ ...candidate, path: '/tmp' }));
   assert.equal(calls.length, before, 'no native call for a rejected candidate');
 });
+
+test('a local HTML page is a first-class text-kind candidate and can be revealed', async t => {
+  const root = await temporary(t);
+  await textFile(root, '高铁方案_原型.html', '<title>高铁</title>', '2026-11-14T10:00:00Z');
+  await textFile(root, '高铁方案_原型_files/app.js', 'console.log(1)', '2026-11-14T10:00:00Z');
+  const { engine, calls } = engineFor(root);
+  const found = await engine.search({ query: '高铁 原型', kind: 'text', sort: 'modified' });
+  assert.deepEqual(found.candidates.map(candidate => candidate.name), ['高铁方案_原型.html']);
+  const candidate = found.candidates[0];
+  assert.equal(candidate.extension, 'html');
+  // Name, folder and modification time are available; the body is deliberately not read.
+  const inspected = await engine.inspect(candidate);
+  assert.equal(inspected.text, '');
+  assert.equal(inspected.candidate.contentStatus, 'unsupported');
+  const revealed = await engine.reveal(candidate);
+  assert.equal(revealed.status, 'reveal_requested');
+  assert.equal(revealed.folder, path.resolve(root));
+  assert.deepEqual(calls.at(-1), ['/usr/bin/open', '-R', path.join(root, '高铁方案_原型.html')]);
+});
