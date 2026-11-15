@@ -41,16 +41,11 @@ function send(message) {
   process.stdout.write(line);
 }
 function notice(code, message) { send({ v: 1, type: 'notice', code, message }); }
-// While a task is actually running, shrink the owned window so the user watches the
-// task, not the form. Background agents keep the full panel for questions/results.
-const PANEL_FULL = Object.freeze({ width: 620, height: 200 });
-const PANEL_COMPACT = Object.freeze({ width: 460, height: 124 });
-// A conversation gets one fixed frame. It must not grow as turns arrive: a card that
-// resizes while you read moves the text under your eyes. The transcript keeps ~4 turns in
-// view, scrolls the newest to the bottom and announces the clipped edge, so the frame can
-// stay the size the conversation started at.
-const PANEL_THREAD = Object.freeze({ width: 620, height: 268 });
-const COMPACT_PHASES = new Set(['preparing', 'listening', 'transcribing', 'working']);
+// One frame for the whole voice session. Receiving, thinking and the conversation all happen
+// in the same card, so there is no size change between stages: the interior re-lays out, the
+// window never moves. A frame that grows as turns arrive moves the text under the reader's
+// eyes, and a compact pill that becomes a card looks like a different surface entirely.
+const PANEL_VOICE = Object.freeze({ width: 620, height: 268 });
 
 /* --------------------------------------------------------------- motion ----
  * The card *is* the window: the page paints only a tint over the native material, so a
@@ -111,19 +106,12 @@ function animateWindow({ to, duration, ease, size = null, opacity = null, guard 
   };
   token.timer = setTimeout(step, 0);
 }
-/** The frame a conversation uses, or null for a single result. Deliberately a constant:
- * content length is the page's problem (it scrolls and reports the clipped edge), not a
- * reason to resize the window under the reader. */
-function conversationSize(state) {
-  const turns = Array.isArray(state?.turns) ? state.turns : [];
-  return turns.length >= 2 ? PANEL_THREAD : null;
-}
-function applyDensity(state) {
-  if (!window || window.isDestroyed() || !state?.visible || !window.isVisible()) return;
-  const size = conversationSize(state)
-    ?? (COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL);
-  // Every state update republishes the same phase; only a real density change may move
-  // the frame, and a morph already heading for this size must not be restarted.
+/** There is nothing to shrink or grow to, so every state lands on the same frame. Kept as a
+ * check rather than deleted: a window from an older build (or a clamped work area) is still
+ * pulled back onto the one size instead of staying at a size the page no longer expects. */
+function applySize() {
+  if (!window || window.isDestroyed() || !window.isVisible()) return;
+  const size = PANEL_VOICE;
   if (motion?.size && motion.size.width === size.width && motion.size.height === size.height) return;
   let bounds;
   try { bounds = window.getBounds(); } catch { return; }
@@ -160,7 +148,7 @@ function rendererState() {
 function publish() {
   const state = rendererState();
   if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(`${prefix}state`, state);
-  applyDensity(state);
+  applySize();
   clearTimeout(stopTimer); stopTimer = null;
   if (controller?.isCapturing() && !controller.mayCapture()) {
     // Renderer normally acknowledges stopped tracks immediately. Destroy the
@@ -219,12 +207,8 @@ async function ensureWindow({ activationId, title, focus = true }) {
     return;
   }
   const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  // Open at the size this activation will actually use: a shortcut pressed to talk should
-  // never appear at full size and then shrink under the cursor.
-  const openingState = controller?.snapshot();
-  const opening = conversationSize(openingState)
-    ?? (COMPACT_PHASES.has(openingState?.phase) || openingState?.capture === true ? PANEL_COMPACT : PANEL_FULL);
-  const width = Math.min(opening.width, workArea.width), height = Math.min(opening.height, workArea.height);
+  // Every activation opens at the one size it keeps for its whole life.
+  const width = Math.min(PANEL_VOICE.width, workArea.width), height = Math.min(PANEL_VOICE.height, workArea.height);
   const ownedWindow = new BrowserWindow({
     width, height, x: Math.round(workArea.x + (workArea.width - width) / 2), y: Math.round(workArea.y + Math.max(24, workArea.height * 0.16)),
     title, show: false, frame: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,

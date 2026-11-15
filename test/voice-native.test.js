@@ -330,12 +330,14 @@ test('the panel window is transparent, so the native material is what the user s
   assert.ok(['content', 'sidebar', 'under-window', 'header', 'sheet', 'window'].includes(material[1]), material[1]);
 });
 
-test('a conversation keeps one frame instead of growing with its text', async () => {
+test('one frame carries the session from listening to conversation', async () => {
   const source = await fs.readFile(path.join(root, 'native/main.mjs'), 'utf8');
   // Content length is the page's problem (it scrolls and reports the clipped edge); the
-  // window must not resize under the reader as turns arrive.
-  assert.match(source, /turns\.length >= 2 \? PANEL_THREAD : null/);
-  assert.doesNotMatch(source, /PANEL_TALL/);
+  // window must not resize under the reader as turns arrive, and the listening stage must
+  // not be a different, smaller surface that the card later grows out of.
+  assert.match(source, /const PANEL_VOICE = Object\.freeze\(\{ width: 620, height: 268 \}\)/u);
+  assert.match(source, /function applySize\(\)/u);
+  assert.doesNotMatch(source, /PANEL_(?:COMPACT|FULL|TALL|THREAD)|conversationSize/u);
 });
 
 test('builder output root is only the project native directory or exact user-approved cache', () => {

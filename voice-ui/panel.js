@@ -1,5 +1,5 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, THREAD_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, shouldDismissThread, panelActivity, panelDensity, selectPanelItems, selectPanelThread, shouldAutoPrepare, threadOverflow } from './view-state.js';
+import { PHASE_LABELS, SHORT_FEEDBACK_DISMISS_MS, THREAD_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, shouldDismissThread, panelActivity, selectPanelItems, selectPanelThread, shouldAutoPrepare, threadOverflow } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
@@ -377,7 +377,10 @@ function renderItems() {
 let threadKey = '';
 function renderThread() {
   const turns = selectPanelThread({ turns: host.turns });
-  const threaded = turns.length >= 2;
+  // As soon as the Host has the user's words, the card is a conversation. That happens at
+  // submit, so the listening composition becomes a transcript once, at the moment the task
+  // starts — never again when the answer arrives.
+  const threaded = turns.length >= 1;
   panel.classList.toggle('is-thread', threaded);
   ui.thread.hidden = !threaded;
   if (!threaded) {
@@ -428,12 +431,17 @@ function syncOverflow() {
     delete thread.dataset.fade;
     return;
   }
-  const viewTop = thread.scrollTop, viewBottom = viewTop + thread.clientHeight;
+  // Bottom-align a conversation that fits, and never while it overflows (see panel.css).
+  const fits = thread.scrollHeight <= thread.clientHeight + 1;
+  if (thread.dataset.align !== (fits ? 'end' : 'start')) thread.dataset.align = fits ? 'end' : 'start';
+  // Measure against the scroll container's own viewport, not offsetTop: the transcript can
+  // be bottom-aligned, and offsetTop is relative to a different ancestor in that case.
+  const view = thread.getBoundingClientRect();
   const turns = [...thread.children];
   // Partly visible content is still hidden content: count a turn whenever any of it is
   // outside the viewport, on the side it is clipped.
-  const above = turns.filter(node => node.offsetTop < viewTop - 4).length;
-  const below = turns.filter(node => node.offsetTop + node.offsetHeight > viewBottom + 4).length;
+  const above = turns.filter(node => node.getBoundingClientRect().top < view.top - 4).length;
+  const below = turns.filter(node => node.getBoundingClientRect().bottom > view.bottom + 4).length;
   const { edge, label } = threadOverflow({ above, below });
   ui.more.hidden = !edge;
   if (edge) {
@@ -916,17 +924,24 @@ function requestAction(name, cancelNotice = '') {
   }
 }
 
+function toldText() {
+  const invitation = !host.message && !localError && !attempt && host.phase === 'ready' ? '说一句要找什么' : '';
+  const told = selectPanelEcho({ phase: host.phase, message: host.message, captureActive }) || invitation;
+  // Once the user's words are in the transcript, repeating them on the live line would say
+  // the same thing twice in one card.
+  const lastTurn = selectPanelThread({ turns: host.turns }).at(-1);
+  return lastTurn && lastTurn.text === told ? '' : told;
+}
+
 function render() {
   if (disposed) return;
   if (!host.visible) pinContent();
   else if (panel.dataset.pinned === '1') unpinContent();
-  // Density is a pure policy over the Host phase, shared with the native helper so the
-  // frame and the interior can never disagree about which shape this task has.
-  // A conversation keeps the tall shape for the whole stretch, including the next turn:
-  // switching back to the compact pill mid-conversation would look like a different card.
-  const density = host.turns.length >= 2 ? 'full' : panelDensity(host.phase);
-  if (panel.dataset.density !== density) panel.dataset.density = density;
   const exists = hasBridge && Boolean(host.activationId) && host.visible;
+  // The card is a conversation as soon as the Host has the user's words; before that it is
+  // the live stage, which shows the same frame with a prompt instead of a transcript.
+  const turnsNow = selectPanelThread({ turns: host.turns });
+  const live = exists && turnsNow.length === 0;
   const recording = Boolean(attempt);
   const busy = Boolean(submission) || ['preparing', 'transcribing', 'working'].includes(host.phase);
   const needsExplicitStart = !recording && !speech && !submission && !busy && !host.canPrepare
@@ -944,7 +959,9 @@ function render() {
   ui.status.title = status;
   // Hide it visually when the result sentence already says it, but keep it announced.
   const redundantStatus = host.phase === 'done' && Boolean(host.message) && !localNotice && !listeningNow;
-  ui.status.classList.toggle('sr-only', redundantStatus);
+  // A live card that already says "正在识别你刚才的话" must not repeat "正在识别…" under it.
+  const genericStatus = shownStatus === PHASE_LABELS[host.phase] && !listeningNow;
+  ui.status.classList.toggle('sr-only', redundantStatus || (live && Boolean(toldText()) && genericStatus));
   panel.classList.toggle('is-typing', typingOpen);
   if (ui.timer) {
     if (listeningNow) {
@@ -988,12 +1005,12 @@ function render() {
   ui.cancel.title = host.phase === 'done' ? '收起结果（Esc）' : '取消本次任务（Esc）';
   ui.cancel.dataset.mode = host.phase === 'done' ? 'dismiss' : 'cancel';
   // The idle screen invites one sentence; every other title is the Host's own words.
-  const invitation = !host.message && !localError && !recording && host.phase === 'ready' ? '说一句要找什么' : '';
-  showText(ui.echo, selectPanelEcho({ phase: host.phase, message: host.message, captureActive }) || invitation);
+  showText(ui.echo, toldText());
   showText(ui.error, localError || (host.phase === 'error' ? host.message || '任务未完成，请重试。' : ''));
   showText(ui.detail, host.detail);
   renderItems();
   renderThread();
+  panel.classList.toggle('is-live', live);
   // In a conversation the last assistant turn already ends the transcript, so the live
   // title line is redundant once the turn settles.
   panel.classList.toggle('is-settled', !recording && !busy && !speech && !submission && (host.phase === 'done' || host.phase === 'ready'));

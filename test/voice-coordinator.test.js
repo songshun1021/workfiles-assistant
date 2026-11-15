@@ -749,6 +749,31 @@ test('a finished search publishes bounded display rows and never an open capabil
   assert.equal(presentationItems(outcomes, 1).length, 1);
 });
 
+test('a history answer carries its pages as rows, pages first, with a copyable address', async t => {
+  const { presentationItems, presentationRowIds } = await import('../lib/voice-session.js');
+  const outcomes = [{ name: 'workfiles_history', value: { ok: true, data: {
+    candidates: [{ id: 'wf-9', name: '环润讯复盘.pptx', folder: '/Users/s/项目/环润讯', modifiedAt: '2026-11-12T01:00:00.000Z' }],
+    webCandidates: [
+      { id: 'wa-11111111-1111-4111-8111-111111111111', name: 'Dithering Shader · Paper', url: 'https://shaders.paper.design/dithering', app: { name: 'Microsoft Edge' }, observedAt: '2026-11-15T14:56:00.000Z' },
+      { id: 'wa-22222222-2222-4222-8222-222222222222', name: 'Halftone CMYK · Paper', url: 'https://shaders.paper.design/halftone-cmyk', app: { name: 'Microsoft Edge' }, observedAt: '2026-11-15T14:40:00.000Z' },
+    ],
+  } } }];
+  const rows = presentationItems(outcomes);
+  assert.equal(rows.length, 3, 'pages and files both become rows');
+  assert.equal(rows[0].name, 'Dithering Shader · Paper');
+  assert.equal(rows[0].type, 'LINK');
+  assert.equal(rows[0].folder, 'Microsoft Edge', 'the app is the row label for a page');
+  assert.equal(rows[0].copy, 'https://shaders.paper.design/dithering');
+  assert.equal(rows[0].copyKind, 'link');
+  assert.equal(rows[2].type, 'PPT');
+  assert.deepEqual(presentationRowIds(outcomes), ['wa-11111111-1111-4111-8111-111111111111', 'wa-22222222-2222-4222-8222-222222222222', 'wf-9']);
+  // A search answer still wins over an older history query in the same turn.
+  const both = [outcomes[0], { name: 'workfiles_search', value: { ok: true, data: { candidates: [{ id: 'wf-new', name: '稿子.docx', folder: '/a/b' }] } } }];
+  assert.deepEqual(presentationItems(both).map(row => row.name), ['稿子']);
+  // An applications-only history answer has nothing to show as rows.
+  assert.equal(presentationItems([{ name: 'workfiles_history', value: { ok: true, data: { detail: 'applications' } } }]).length, 0);
+});
+
 test('the completion state carries those rows to the native helper', async t => {
   const items = Array.from({ length: 8 }, (_, index) => ({ name: `第${index}份.html`, folder: '/a/b', modifiedAt: '2026-11-15T00:00:00.000Z' }));
   const h = harness(t, { run: async () => ({ status: 'done', say: '找到几份资料。', items }) });

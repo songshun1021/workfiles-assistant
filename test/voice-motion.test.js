@@ -118,15 +118,12 @@ test('the native frame and the page interior cannot drift apart', async () => {
   for (const property of ['padding', 'column-gap', 'gap', 'max-height', 'width', 'height']) {
     assert.match(css, new RegExp(`transition:[^;]*${property}[^;]*var\\(--voice-morph-ms\\)`, 'u'), property);
   }
-  // Density is the Host phase, not the viewport: a viewport breakpoint would re-flow the
-  // interior halfway through the native growth.
-  const densityBlock = panel.slice(panel.indexOf('function render()'), panel.indexOf('function render()') + 1200);
-  assert.match(densityBlock, /panelDensity\(host\.phase\)/u);
-  // A conversation owns the tall shape for its whole life, including the next turn.
-  assert.match(densityBlock, /host\.turns\.length >= 2 \? 'full'/u);
-  const densityLine = densityBlock.split('\n').find(line => line.includes('panel.dataset.density =')) || '';
-  assert.doesNotMatch(densityLine, /innerWidth|innerHeight|clientHeight|matchMedia/u);
-  assert.doesNotMatch(css, /@media\s*\(max-height/u);
+  // One frame for the whole session: the interior must not choose a per-phase size, and the
+  // native side must not keep a size ladder. Layout by viewport is still forbidden.
+  assert.doesNotMatch(panel, /panelDensity|dataset\.density/u);
+  assert.doesNotMatch(css, /data-density|@media\s*\(max-height/u);
+  assert.match(main, /const PANEL_VOICE = Object\.freeze\(\{ width: 620, height: 268 \}\)/u);
+  assert.doesNotMatch(main, /PANEL_(?:COMPACT|FULL|THREAD)|conversationSize/u);
   // The exit scales the card by the factor the frame lost, measured per frame.
   assert.match(panel, /window\.innerWidth \/ width/u);
   assert.match(css, /transform: scale\(var\(--voice-leave-scale/u);

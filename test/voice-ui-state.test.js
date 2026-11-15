@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   PHASE_LABELS, SHORT_FEEDBACK_MAX_CHARACTERS, SHORT_FEEDBACK_DISMISS_MS, THREAD_FEEDBACK_DISMISS_MS,
   selectPanelStatus, selectPanelEcho, feedbackKey, updateFeedbackRetention, shouldAutoDismissFeedback, shouldDismissThread,
-  PANEL_SIZES, panelDensity, panelActivity, shouldAutoPrepare,
+  PANEL_SIZES, panelActivity, shouldAutoPrepare,
 } from '../voice-ui/view-state.js';
 
 const idle = Object.freeze({ hasBridge: true, activationId: 'activation-a', phase: 'listening' });
@@ -135,10 +135,8 @@ test('presentation helpers do not mutate Host state or grant any microphone/brid
   assert.deepEqual(source, before);
 });
 
-test('the panel shrinks only while a task is really running, and reports its activity state', () => {
-  assert.deepEqual(PANEL_SIZES.full, { width: 620, height: 200 });
-  for (const phase of ['preparing', 'listening', 'transcribing', 'working']) assert.equal(panelDensity(phase), 'compact');
-  for (const phase of ['ready', 'question', 'done', 'error']) assert.equal(panelDensity(phase), 'full');
+test('every phase shares one frame and reports its activity state', () => {
+  assert.deepEqual(PANEL_SIZES, { voice: { width: 620, height: 268 } });
   assert.equal(panelActivity('listening', true), 'listening');
   assert.equal(panelActivity('working'), 'working');
   assert.equal(panelActivity('transcribing'), 'working');
@@ -148,12 +146,14 @@ test('the panel shrinks only while a task is really running, and reports its act
   assert.equal(panelActivity('ready'), 'idle');
 });
 
-test('the native window sizes and the pure density policy cannot drift apart', async () => {
+test('the native window creates exactly the frame the page expects', async () => {
   const source = await readFile(new URL('../native/main.mjs', import.meta.url), 'utf8');
   for (const [name, size] of Object.entries(PANEL_SIZES)) {
     const expected = `PANEL_${name.toUpperCase()} = Object.freeze({ width: ${size.width}, height: ${size.height} })`;
     assert.ok(source.includes(expected), expected);
   }
+  // Receiving, thinking and the conversation are one card: no per-phase size ladder.
+  assert.doesNotMatch(source, /PANEL_(?:COMPACT|FULL|THREAD)|conversationSize/u);
 });
 
 test('a voice gesture prepares itself once per activation instead of asking for a click', () => {

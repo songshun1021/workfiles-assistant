@@ -175,8 +175,47 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   .voice-panel { background: color-mix(in srgb, Canvas 88%, transparent); }
 }
 
+/* --------------------------------------------------------------- live stage */
+/* Receiving and thinking have no transcript yet, so they get their own composition in the
+   *same* frame: orb in the corner, the prompt in the middle, the composer on the bottom edge.
+   The first turn replaces the prompt in place; the window itself never changes size. */
+.voice-panel.is-live {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  row-gap: 6px;
+  column-gap: 10px;
+  --voice-orb-sized: 56px;
+}
+.voice-panel.is-live .voice-content,
+.voice-panel.is-live .voice-line { display: contents; }
+.voice-panel.is-live .voice-orb { grid-row: 1; grid-column: 1; align-self: start; }
+.voice-panel.is-live .voice-timer { grid-row: 1; grid-column: 2; justify-self: end; }
+.voice-panel.is-live .voice-title,
+.voice-panel.is-live .voice-error {
+  grid-row: 2; grid-column: 1 / -1;
+  /* The title's bottom edge and the subtitle's top edge meet on the centre line, which is
+     the only way two separate grid items can read as one centred sentence pair. */
+  align-self: center; justify-self: center;
+  transform: translateY(-100%);
+  padding: 0 28px 6px;
+  text-align: center;
+  font-size: 17px; line-height: 1.4;
+  max-height: none; overflow: visible;
+}
+.voice-panel.is-live .voice-subtitle {
+  grid-row: 2; grid-column: 1 / -1;
+  align-self: center; justify-self: center;
+  padding: 0 28px;
+  text-align: center;
+}
+.voice-panel.is-live .voice-acts { grid-row: 3; grid-column: 1 / -1; justify-content: flex-end; }
+.voice-panel.is-live .voice-body { grid-row: 4; grid-column: 1 / -1; text-align: center; }
+.voice-panel.is-live .text-form { grid-row: 4; grid-column: 1 / -1; }
+.voice-panel.is-live #progress { grid-row: 5; grid-column: 1 / -1; }
+
 /* Listening is the one moment the orb is the subject, so it gets the room. */
-.voice-panel[data-phase="listening"] { --voice-orb-sized: 92px; }
+.voice-panel.is-live[data-phase="listening"] { --voice-orb-sized: 72px; }
 
 /* ------------------------------------------------------------------ orb */
 .voice-orb {
@@ -368,6 +407,11 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 .voice-panel.is-thread { align-items: stretch; --voice-orb-sized: 46px; }
 .voice-panel.is-thread .voice-thread { display: grid; }
+/* A fixed frame that is taller than the conversation should read from the bottom, like a
+   chat: the newest line lands just above the composer instead of leaving a gap under it.
+   Only applied while everything fits; once it overflows the transcript must scroll, and a
+   bottom-aligned scroll container hides its own overflow in Chromium. */
+.voice-thread[data-align="end"] { align-content: end; }
 .voice-panel.is-thread .voice-content {
   align-content: stretch;
   /* transcript | status | live line + actions. The status belongs above the composer: it
@@ -534,23 +578,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   will-change: transform;
   pointer-events: none;
 }
-
-/* Compact density: the native helper shrinks the frame while a task is actually running,
-   and the page trades air for tightness on the same curve. No font-size change happens
-   here on purpose: a density change should move the air, never the type. */
-.voice-panel[data-density="compact"],
-.voice-panel[data-density="compact"][data-phase="listening"] {
-  --voice-orb-sized: 60px;
-  --voice-gap: 12px;
-  --voice-pad: 13px 15px;
-}
-.voice-panel[data-density="compact"] .voice-content { gap: 4px; }
-.voice-panel[data-density="compact"] .voice-body {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-}
-.voice-panel[data-density="compact"] .voice-items { display: none; }
 
 /* The first state arrives after load. Without this guard the interior would self-animate
    its own metrics on open, while the native frame is already at its final size. */

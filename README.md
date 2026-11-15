@@ -101,7 +101,7 @@ DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处�
 | `native/` | 小窗的 Electron 组件源码、`motion.mjs` 动画几何、构建脚本与线路协议 |
 | `test/` | 纯 Node 测试，不需要 GUI、麦克风或真实 DSH 会话 |
 | `locale/` `cordis.patch.yml` | 文案与插件补丁清单 |
-| `design/` | 收敛后的液体玻璃面板设计稿 `panel-flow-blue.html`、连续对话原型 `panel-conversation.html`、原型与真窗口的对照截图 `glass-compare.png`，以及历史概念稿 |
+| `design/` | 收敛后的液体玻璃面板设计稿 `panel-flow-blue.html`、连续对话原型 `panel-conversation.html`、原型与真窗口的对照 `glass-compare.png`、一张卡片三个阶段 `panel-stages.png`，以及历史概念稿 |
 | `.native/` | 本机构建记录（不入库，每台机器各自生成） |
 
 常用命令：

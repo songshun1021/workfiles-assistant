@@ -71,15 +71,11 @@ export function shouldAutoDismissFeedback(state, {
   return Array.from(message).length <= SHORT_FEEDBACK_MAX_CHARACTERS;
 }
 
-// Window density policy: while a task is actually running the panel shrinks so the
-// user focuses on progress instead of on the full form. Pure mapping, no DOM.
-export const PANEL_SIZES = Object.freeze({ full: Object.freeze({ width: 620, height: 200 }), compact: Object.freeze({ width: 460, height: 124 }) });
-export function panelDensity(phase) {
-  // Compact for the whole stretch where the panel is doing the talking (and listening);
-  // full only when there is something to read or decide. That keeps one shrink and one
-  // grow per task instead of a window that bounces between sizes.
-  return ['preparing', 'listening', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
-}
+// One frame for the whole voice session: receiving, thinking and the conversation all
+// happen in the same card. Shared with the native helper so the page and the window cannot
+// disagree about its size; content length is the page's problem (it scrolls), never a
+// reason to resize the window under the reader.
+export const PANEL_SIZES = Object.freeze({ voice: Object.freeze({ width: 620, height: 268 }) });
 /** The one row shape the panel renders, shared by the current result and the transcript. */
 export function panelRow(item) {
   if (!item || typeof item.name !== 'string' || !item.name.trim()) return null;
