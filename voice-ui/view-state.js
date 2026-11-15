@@ -43,6 +43,23 @@ export function updateFeedbackRetention(previous, state, reading = false) {
   return Object.freeze({ key, retained: Boolean(key && (reading || (previous?.key === key && previous.retained))) });
 }
 
+// A finished conversation is bigger than a one-line toast, so it gets a longer budget than
+// the 2.1s a bare "已打开" used to get. Long enough to read three rows, short enough that a
+// clean answer does not leave a card parked on the desktop.
+export const THREAD_FEEDBACK_DISMISS_MS = 7000;
+
+/** A finished conversation may close itself only when there is nothing left to do with it:
+ * it is done, visible, nothing is clipped out of view, nobody scrolled/selected/focused it,
+ * and it is not the keyboard or a failure. The caller owns the "is this a transcript" fact;
+ * this rule stays pure and testable. */
+export function shouldDismissThread(state, {
+  overflow = false, retained = false, reading = false, keyboardOpen = false,
+  hasError = false, hasNotice = false, pageVisible = true,
+} = {}) {
+  if (!feedbackKey(state) || !pageVisible || overflow || retained || reading || keyboardOpen) return false;
+  return !hasError && !hasNotice;
+}
+
 export function shouldAutoDismissFeedback(state, {
   retained = false, reading = false, overflowing = false, keyboardOpen = false,
   hasError = false, pageVisible = true,

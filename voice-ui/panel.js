@@ -1,5 +1,5 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, selectPanelItems, selectPanelThread, shouldAutoPrepare, threadOverflow } from './view-state.js';
+import { SHORT_FEEDBACK_DISMISS_MS, THREAD_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, shouldDismissThread, panelActivity, panelDensity, selectPanelItems, selectPanelThread, shouldAutoPrepare, threadOverflow } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
@@ -227,6 +227,9 @@ let uncertainText;
 let operationTimer;
 let doneTimer;
 let doneKey = '';
+// Declared with the other panel state: the timer policy reads it before the listeners below
+// are wired, and a state that arrives during setup must not hit a temporal dead zone.
+let readerScrolled = false;
 let feedbackRetention = updateFeedbackRetention(undefined, undefined);
 let speech;
 let speechEpoch = 0;
@@ -502,6 +505,33 @@ function feedbackOverflows() {
   return [ui.echo, ui.detail].some(node => !node.hidden && (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1));
 }
 
+/** Reading a transcript counts as intent too: a selection or focus inside it means the
+ * card is being used, not abandoned. */
+function threadReading() {
+  if (ui.thread.hidden) return false;
+  if (ui.thread.contains(document.activeElement)) return true;
+  try {
+    const selection = window.getSelection();
+    return Boolean(selection && !selection.isCollapsed
+      && (ui.thread.contains(selection.anchorNode) || ui.thread.contains(selection.focusNode)));
+  } catch { return false; }
+}
+
+/** A finished conversation may leave on its own, but only when it is entirely visible and
+ * untouched: the moment something is clipped, scrolled, selected or typed into, it stays
+ * until the user closes it (or the Host's long idle backstop fires). */
+function mayCollapseThread() {
+  return panel.classList.contains('is-thread') && shouldDismissThread(host, {
+    overflow: !ui.thread.hidden && !ui.more.hidden,
+    retained: feedbackRetention.retained,
+    reading: readerScrolled,
+    keyboardOpen: typingOpen,
+    hasError: Boolean(localError),
+    hasNotice: Boolean(localNotice),
+    pageVisible: document.visibilityState !== 'hidden',
+  });
+}
+
 function mayDismissFeedback() {
   return host.phase === 'done' && shouldAutoDismissFeedback(host, {
     retained: feedbackRetention.retained, reading: readingFeedback(), overflowing: feedbackOverflows(),
@@ -517,22 +547,23 @@ function retainFeedbackForReading() {
 }
 
 function syncFeedbackTimer() {
-  // A conversation is meant to be read and continued; it closes on the user's gesture (or
-  // the Host's idle timeout), never on a 2-second timer.
-  if (panel.classList.contains('is-thread')) { clearDoneTimer(); return; }
-  feedbackRetention = updateFeedbackRetention(feedbackRetention, host, host.phase === 'done' && (typingOpen || readingFeedback()));
-  if (!mayDismissFeedback()) { clearDoneTimer(); return; }
-  const key = feedbackRetention.key;
+  const threaded = panel.classList.contains('is-thread');
+  feedbackRetention = updateFeedbackRetention(feedbackRetention, host,
+    host.phase === 'done' && (typingOpen || readingFeedback() || threadReading()));
+  const eligible = threaded ? mayCollapseThread() : mayDismissFeedback();
+  if (!eligible) { clearDoneTimer(); return; }
+  const key = `${feedbackRetention.key}\u0000${threaded ? 'thread' : 'line'}`;
   if (doneKey === key && doneTimer !== undefined) return;
   clearDoneTimer();
   doneKey = key;
   doneTimer = window.setTimeout(() => {
     doneTimer = undefined;
     // Recheck focus/selection/overflow and the exact result at the firing boundary.
-    feedbackRetention = updateFeedbackRetention(feedbackRetention, host, readingFeedback());
-    if (!disposed && feedbackRetention.key === key && mayDismissFeedback()) requestAction('dismiss');
+    feedbackRetention = updateFeedbackRetention(feedbackRetention, host, readingFeedback() || threadReading());
+    const stillIdle = threaded ? mayCollapseThread() : mayDismissFeedback();
+    if (!disposed && doneKey === key && stillIdle) requestAction('dismiss');
     else { clearDoneTimer(); render(); }
-  }, SHORT_FEEDBACK_DISMISS_MS);
+  }, threaded ? THREAD_FEEDBACK_DISMISS_MS : SHORT_FEEDBACK_DISMISS_MS);
 }
 
 function clearOperationTimer() {
@@ -978,7 +1009,7 @@ function render() {
   else if (typingOpen) hint = '仅按 Enter 或点击发送才会提交';
   else if (host.canPrepare) hint = '首次使用：点击准备本地识别，不会开启麦克风';
   else if (needsExplicitStart && ['ready', 'listening', 'question'].includes(host.phase)) hint = '点击开始说话继续录音';
-  else if (host.phase === 'done') hint = mayDismissFeedback() ? '本次任务已结束 · 即将收起' : '结果已保留 · 阅读完点击收起';
+  else if (host.phase === 'done') hint = mayDismissFeedback() || mayCollapseThread() ? '本次任务已结束 · 即将收起' : '结果已保留 · 阅读完点击收起';
   ui.hint.textContent = hint;
   ui.hint.title = hint;
   ui['typing-toggle'].disabled = !exists || busy || Boolean(actionPending);
@@ -1000,9 +1031,8 @@ for (const node of [ui.echo, ui.detail]) {
   node.addEventListener('wheel', retainFeedbackForReading, { passive: true });
 }
 document.addEventListener('scroll', retainFeedbackForReading, { capture: true, passive: true });
-document.addEventListener('selectionchange', () => { if (readingFeedback()) retainFeedbackForReading(); });
+document.addEventListener('selectionchange', () => { if (readingFeedback() || threadReading()) retainFeedbackForReading(); });
 
-let readerScrolled = false;
 ui.thread.addEventListener('scroll', () => { syncOverflow(); }, { passive: true });
 for (const type of ['wheel', 'pointerdown', 'touchstart']) ui.thread.addEventListener(type, () => { readerScrolled = true; }, { passive: true });
 window.addEventListener('resize', () => {

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  PHASE_LABELS, SHORT_FEEDBACK_MAX_CHARACTERS, SHORT_FEEDBACK_DISMISS_MS,
-  selectPanelStatus, selectPanelEcho, feedbackKey, updateFeedbackRetention, shouldAutoDismissFeedback,
+  PHASE_LABELS, SHORT_FEEDBACK_MAX_CHARACTERS, SHORT_FEEDBACK_DISMISS_MS, THREAD_FEEDBACK_DISMISS_MS,
+  selectPanelStatus, selectPanelEcho, feedbackKey, updateFeedbackRetention, shouldAutoDismissFeedback, shouldDismissThread,
   PANEL_SIZES, panelDensity, panelActivity, shouldAutoPrepare,
 } from '../voice-ui/view-state.js';
 
@@ -58,6 +58,25 @@ test('only short one-line successful feedback can keep the existing 2.1-second d
   assert.equal(shouldAutoDismissFeedback({ ...done, message: '文'.repeat(SHORT_FEEDBACK_MAX_CHARACTERS) }), true);
   assert.equal(shouldAutoDismissFeedback({ ...done, message: '文'.repeat(SHORT_FEEDBACK_MAX_CHARACTERS + 1) }), false);
   assert.equal(shouldAutoDismissFeedback({ ...done, message: '📄'.repeat(SHORT_FEEDBACK_MAX_CHARACTERS) }), true, 'length uses Unicode code points, not UTF-16 units');
+});
+
+test('a clean, fully visible conversation closes itself after the longer thread budget', () => {
+  assert.equal(THREAD_FEEDBACK_DISMISS_MS, 7000);
+  assert.equal(shouldDismissThread(done), true);
+  // Nothing to clarify, no failure: a shorter or longer answer does not change the rule.
+  assert.equal(shouldDismissThread({ ...done, message: '文'.repeat(400) }), true);
+  assert.equal(shouldDismissThread({ ...done, detail: '补充说明' }), true);
+});
+
+test('a conversation stays while anything is clipped, being read, typed into or broken', () => {
+  for (const options of [
+    { overflow: true }, { retained: true }, { reading: true }, { keyboardOpen: true },
+    { hasError: true }, { hasNotice: true }, { pageVisible: false },
+  ]) assert.equal(shouldDismissThread(done, options), false, JSON.stringify(options));
+  // Questions and failures are never a clean finish, whatever the viewport says.
+  assert.equal(shouldDismissThread({ ...done, phase: 'question' }), false);
+  assert.equal(shouldDismissThread({ ...done, phase: 'error' }), false);
+  assert.equal(shouldDismissThread({ ...done, visible: false }), false);
 });
 
 test('long feedback, multiple lines and supplemental detail remain for manual dismissal', () => {
