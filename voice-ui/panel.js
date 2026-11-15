@@ -1,10 +1,10 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, shouldAutoPrepare } from './view-state.js';
+import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, selectPanelItems, shouldAutoPrepare } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
 const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
-const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content'].map(id => [id, document.getElementById(id)]));
+const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content', 'items'].map(id => [id, document.getElementById(id)]));
 const panel = document.querySelector('.voice-panel');
 const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
 
@@ -202,7 +202,7 @@ const ERRORS = {
   'capture-unavailable': '无法开始录音。请检查麦克风权限，或用键盘输入。',
 };
 const HOST_RESPONSE_TIMEOUT_MS = 120000;
-let host = { activationId: '', capture: false, listen: false, visible: true, phase: 'ready', message: '', detail: '' };
+let host = { activationId: '', capture: false, listen: false, visible: true, phase: 'ready', message: '', detail: '', items: [] };
 const retiredActivations = new Set();
 let disposed = false;
 let unsubscribe;
@@ -274,6 +274,34 @@ function settleDensity() {
 function formatElapsed(ms) {
   const total = Math.max(0, Math.round((Number.isFinite(ms) ? ms : 0) / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Local wall-clock stamp for a row; the state only carries the opaque ISO string. */
+function shortStamp(value) {
+  const time = Date.parse(typeof value === 'string' ? value : '');
+  if (!Number.isFinite(time)) return '';
+  const date = new Date(time); const pad = number => String(number).padStart(2, '0');
+  return `${date.getMonth() + 1}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+let itemsKey = '';
+// Rows are display-only: names, folders and times, never ids. Rebuilt only when the
+// projection actually changes, because render() runs on every state tick.
+function renderItems() {
+  const rows = selectPanelItems({ phase: host.phase, items: host.items });
+  const key = rows.map(row => `${row.name}\u0001${row.folderLabel}\u0001${row.modifiedAt}`).join('\u0002');
+  if (key === itemsKey) return;
+  itemsKey = key;
+  if (!rows.length) { ui.items.replaceChildren(); ui.items.hidden = true; return; }
+  ui.items.replaceChildren(...rows.map(row => {
+    const item = document.createElement('li'); item.className = 'voice-item';
+    const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
+    const meta = document.createElement('span'); meta.className = 'voice-item-meta';
+    meta.textContent = [row.folderLabel, shortStamp(row.modifiedAt)].filter(Boolean).join(' · ');
+    item.append(name, meta);
+    return item;
+  }));
+  ui.items.hidden = false;
 }
 
 function showText(node, text) {
@@ -550,6 +578,11 @@ function normalizeState(value) {
     message: typeof value.message === 'string' ? value.message.slice(0, 1000) : '',
     detail: typeof value.detail === 'string' ? value.detail.slice(0, 1000) : '',
     canPrepare: value.canPrepare === true,
+    items: Array.isArray(value.items) ? value.items.slice(0, 5).flatMap(item => item && typeof item.name === 'string' && item.name ? [{
+      name: item.name.slice(0, 300),
+      ...(typeof item.folder === 'string' ? { folder: item.folder.slice(0, 4096) } : {}),
+      ...(typeof item.modifiedAt === 'string' ? { modifiedAt: item.modifiedAt.slice(0, 64) } : {}),
+    }] : []) : [],
     progress: Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 1 ? value.progress : undefined,
     signal: value.signal === 'stop-submit' ? value.signal : undefined,
     signalId: Number.isSafeInteger(value.signalId) && value.signalId >= 0 ? value.signalId : undefined,
@@ -736,6 +769,7 @@ function render() {
   showText(ui.echo, selectPanelEcho({ phase: host.phase, message: host.message, captureActive }) || invitation);
   showText(ui.error, localError || (host.phase === 'error' ? host.message || '任务未完成，请重试。' : ''));
   showText(ui.detail, host.detail);
+  renderItems();
   ui.progress.hidden = host.phase !== 'preparing';
   if (host.progress === undefined) ui.progress.removeAttribute('value');
   else ui.progress.value = host.progress;

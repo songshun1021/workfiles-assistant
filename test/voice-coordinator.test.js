@@ -723,3 +723,43 @@ test('shortcut ack waiting is bounded and cancellation/dispose revoke the waiter
   await assert.rejects(pending);
   assert.equal(h.calls.runs.length + other.calls.runs.length, 0);
 });
+
+test('a finished search publishes bounded display rows and never an open capability', async t => {
+  const { presentationItems } = await import('../lib/voice-session.js');
+  const { selectPanelItems } = await import('../voice-ui/view-state.js');
+  const outcomes = [{ name: 'workfiles_search', value: { ok: true, data: { candidates: [
+    { id: 'wf-1', name: 'e-bot-panel.html', path: '/Users/s/Documents/DSHarness/ui-concepts/archive/e-bot-panel.html', relativePath: 'DSHarness/ui-concepts/archive/e-bot-panel.html', folder: '/Users/s/Documents/DSHarness/ui-concepts/archive', modifiedAt: '2026-11-15T06:57:57.142Z' },
+    { id: 'wf-2', name: '稿子.html', folder: '/Users/s/Desktop', modifiedAt: '2026-11-14T02:00:00.000Z' },
+  ] } } }];
+  const rows = presentationItems(outcomes);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].name, 'e-bot-panel.html');
+  assert.equal(Object.hasOwn(rows[0], 'id'), false, 'no open capability may cross to the renderer');
+  assert.equal(Object.hasOwn(rows[0], 'path'), false);
+  const projected = selectPanelItems({ phase: 'done', items: rows });
+  assert.deepEqual(projected.map(row => row.folderLabel), ['ui-concepts/archive', 'Desktop']);
+  assert.equal(selectPanelItems({ phase: 'working', items: rows }).length, 0);
+  assert.equal(selectPanelItems({ phase: 'done', items: rows, max: 1 }).length, 1);
+  assert.deepEqual(selectPanelItems({ phase: 'done', items: [{ name: '   ' }, null] }), []);
+  assert.equal(presentationItems([{ name: 'workfiles_search', value: { ok: false } }]).length, 0);
+  assert.equal(presentationItems([]).length, 0);
+  assert.equal(presentationItems(outcomes, 1).length, 1);
+});
+
+test('the completion state carries those rows to the native helper', async t => {
+  const items = Array.from({ length: 8 }, (_, index) => ({ name: `第${index}份.html`, folder: '/a/b', modifiedAt: '2026-11-15T00:00:00.000Z' }));
+  const h = harness(t, { run: async () => ({ status: 'done', say: '找到几份资料。', items }) });
+  await h.activate('activation-rows', true);
+  h.audio('activation-rows');
+  await h.coordinator.settled();
+  const done = h.states().findLast(state => state.phase === 'done');
+  assert.ok(done, 'the run completes');
+  assert.equal(done.items.length, 5, 'the renderer never receives more rows than it can show');
+  assert.deepEqual(Object.keys(done.items[0]), ['name', 'folder', 'modifiedAt']);
+  // A question that needs an answer can show rows too; an error must not.
+  const failing = harness(t, { run: async () => ({ status: 'error', say: '打开失败。', items }) });
+  await failing.activate('activation-error', true);
+  failing.audio('activation-error');
+  await failing.coordinator.settled();
+  assert.equal(failing.states().findLast(state => state.phase === 'error').items, undefined);
+});

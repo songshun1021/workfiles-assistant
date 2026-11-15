@@ -19,7 +19,7 @@ export function createNativeController({ send, onState = () => {}, onShow = () =
     if (!current) return Object.freeze({ activationId: null, phase: 'ready', message: '准备就绪', capture: false, listen: false, visible: false, canPrepare: false });
     const c = current;
     return Object.freeze({ activationId: c.id, phase: c.phase, capture: c.captureIntent && c.armed && c.visible, listen: c.listen && c.visible, visible: c.visible,
-      message: c.message, ...(c.detail === undefined ? {} : { detail: c.detail }), canPrepare: c.canPrepare,
+      message: c.message, ...(c.detail === undefined ? {} : { detail: c.detail }), ...(c.items ? { items: c.items.map(item => ({ ...item })) } : {}), canPrepare: c.canPrepare,
       ...(c.progress === undefined ? {} : { progress: c.progress }), ...(c.signal ? { signal: c.signal, signalId: c.signalId } : {}) });
   }
   const publish = () => onState(snapshot());
@@ -98,6 +98,8 @@ export function createNativeController({ send, onState = () => {}, onShow = () =
       if (m.type === 'state') {
         const c = requireOpen(m.activationId);
         c.phase = m.phase; c.message = m.message ?? ''; c.detail = m.detail; c.canPrepare = m.canPrepare ?? false; c.progress = m.progress; c.signal = undefined;
+        // Presentation rows live and die with the state that produced them.
+        c.items = Array.isArray(m.items) && m.items.length ? m.items.map(item => ({ ...item })) : undefined;
         // Questions are display-only. Answering requires a new shortcut/record gesture and UUID.
         c.listen = m.listen === true && m.phase === 'listening' && c.armed;
         c.captureIntent = c.armed && c.listen;

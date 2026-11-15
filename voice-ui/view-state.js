@@ -63,6 +63,22 @@ export function panelDensity(phase) {
   // grow per task instead of a window that bounces between sizes.
   return ['preparing', 'listening', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
 }
+/** Rows the panel may show next to the spoken answer. Only successful results and
+ * questions show them, at most `max` rows; the folder is shortened to its last two
+ * segments and the timestamp stays an opaque string for the page to localise. */
+export function selectPanelItems({ phase = 'done', items = [], max = 3 } = {}) {
+  if (phase !== 'done' && phase !== 'question') return [];
+  const rows = Array.isArray(items) ? items : [];
+  return rows.filter(item => item && typeof item.name === 'string' && item.name.trim()).slice(0, Math.max(0, max)).map(item => {
+    const segments = typeof item.folder === 'string' ? item.folder.split('/').filter(Boolean) : [];
+    return {
+      name: item.name.slice(0, 140),
+      folderLabel: segments.slice(-2).join('/'),
+      modifiedAt: typeof item.modifiedAt === 'string' ? item.modifiedAt.slice(0, 64) : '',
+    };
+  });
+}
+
 // Busy phases pulse a subtle indicator; reduced-motion users still get the text state.
 export function panelActivity(phase = 'ready', captureActive = false) {
   if (captureActive) return 'listening';

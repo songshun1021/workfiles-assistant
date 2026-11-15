@@ -77,9 +77,24 @@ export function parseHostMessage(input) {
     case 'show':
       fields(m, ['activationId', 'capture']); id(m.activationId); bool(m.capture, 'capture'); break;
     case 'state':
-      fields(m, ['activationId', 'phase'], ['message', 'detail', 'listen', 'canPrepare', 'progress']); id(m.activationId);
+      fields(m, ['activationId', 'phase'], ['message', 'detail', 'listen', 'canPrepare', 'progress', 'items']); id(m.activationId);
       if (!PHASES.includes(m.phase)) fail('Invalid phase');
       optionalText(m, 'message', 1000); optionalText(m, 'detail', 1000);
+      if (own(m, 'items')) {
+        // Display-only rows for the panel. They carry no id and no path authority, so the
+        // renderer can show what was found without ever holding an open capability.
+        if (!Array.isArray(m.items) || m.items.length > 5) fail('Invalid items');
+        for (const item of m.items) {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || Object.getPrototypeOf(item) !== Object.prototype) fail('Invalid items');
+          for (const key of Reflect.ownKeys(item)) {
+            if (!['name', 'folder', 'modifiedAt'].includes(key)) fail('Unknown item field');
+            if (!own(Object.getOwnPropertyDescriptor(item, key) || {}, 'value')) fail('Message accessors are not permitted');
+          }
+          text(item.name, 'items.name', 300);
+          optionalText(item, 'folder', 4096);
+          optionalText(item, 'modifiedAt', 64);
+        }
+      }
       if (own(m, 'listen')) bool(m.listen, 'listen');
       if (own(m, 'canPrepare')) bool(m.canPrepare, 'canPrepare');
       if (own(m, 'progress') && (typeof m.progress !== 'number' || !Number.isFinite(m.progress) || m.progress < 0 || m.progress > 1)) fail('Invalid progress');

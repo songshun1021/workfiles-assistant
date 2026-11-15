@@ -247,6 +247,39 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 
 
+/* --------------------------------------------------------- result rows */
+/* Display-only rows the Host reports with a result: name, folder, time. They carry no
+   id, so they are readable and pointable ("第二个"), never an open capability by
+   themselves. Kept to three rows: the panel is a card, not a list page. */
+.voice-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--voice-muted);
+}
+.voice-item { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.voice-item-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--voice-ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-item-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+
 /* -------------------------------------------------------------- actions */
 .voice-acts { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; margin-left: auto; }
 
@@ -344,7 +377,8 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 /* Keyboard mode: the sentence and the field, nothing else. */
 .voice-panel.is-typing .voice-body,
-.voice-panel.is-typing .voice-subtitle { display: none; }
+.voice-panel.is-typing .voice-subtitle,
+.voice-panel.is-typing .voice-items { display: none; }
 
 @keyframes voice-sheen { from { background-position: 0% 0; } to { background-position: 100% 0; } }
 @keyframes voice-spin { to { transform: rotate(360deg); } }
@@ -382,6 +416,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   opacity: 0;
   overflow: hidden;
 }
+.voice-panel[data-density="compact"] .voice-items { display: none; }
 
 /* The first state arrives after load. Without this guard the interior would self-animate
    its own metrics on open, while the native frame is already at its final size. */
