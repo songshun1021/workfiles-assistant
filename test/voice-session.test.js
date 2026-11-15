@@ -555,3 +555,50 @@ test('disposing during binding cancels admission, releases the cue and joins the
   await voice.dispose(); assert.equal((await pending).status, 'error');
   assert.equal(env.calls.prompt.length, 0); assert.ok(released.includes(token)); gate.resolve(true);
 });
+
+test('the completion sentence names what was opened, and the card can list it', async () => {
+  const file = { name: 'e-bot-panel.html', folder: '/Users/s/Documents/DSHarness/ui-concepts/archive', relativePath: 'DSHarness/ui-concepts/archive/e-bot-panel.html', modifiedAt: '2026-11-15T06:57:57.142Z' };
+  const page = { name: '(1) X 上的 hidecloud：“Four months after we launched Manus…” / X - 已固定 - Microsoft Edge', url: 'https://x.com/hidecloud/status/1', app: { id: 'com.microsoft.edge', name: 'Microsoft Edge' }, observedAt: '2026-11-15T07:01:24.370Z' };
+  const env = fixture({ completion: { delivery: delivery('done', '已打开。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'open_requested', candidate: file } } }] } });
+  const voice = createVoiceSession({ ctx: env.ctx });
+  const result = await voice.run('打开资料');
+  assert.equal(result.status, 'done');
+  assert.equal(result.say, '已打开《e-bot-panel.html》。');
+  assert.equal(result.items.length, 1);
+  assert.deepEqual(Object.keys(result.items[0]), ['name', 'folder', 'modifiedAt']);
+  assert.equal(result.items[0].folder, 'ui-concepts/archive');
+  await voice.dispose();
+
+  // An observed page shows its title without the browser suffix, and its app as the label.
+  const web = fixture({ completion: { delivery: delivery('done', '已打开。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'open_requested', targetType: 'web', candidate: page } } }] } });
+  const webVoice = createVoiceSession({ ctx: web.ctx });
+  const opened = await webVoice.run('打开那条推文');
+  assert.ok(opened.say.startsWith('已打开《X 上的 hidecloud'), opened.say);
+  assert.ok(Array.from(opened.say).length <= 121, 'the sentence stays bounded');
+  assert.ok(!opened.say.includes('Microsoft Edge'), 'the app suffix is dropped from the title');
+  assert.equal(opened.items[0].folder, 'Microsoft Edge');
+  await webVoice.dispose();
+
+  // Many items: say how many and name the first; a partial batch admits the failure.
+  const many = [1, 2, 3, 4].map(index => ({ name: `资料${index}.pptx`, folder: '/Users/s/Documents/工作', relativePath: `工作/资料${index}.pptx`, modifiedAt: '2026-11-15T00:00:00.000Z' }));
+  const batch = fixture({ completion: { delivery: delivery('done', '已打开。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'open_requested', results: many.map(candidate => ({ status: 'open_requested', targetType: 'file', name: candidate.name, folder: candidate.folder })) } } }] } });
+  const batchVoice = createVoiceSession({ ctx: batch.ctx });
+  const four = await batchVoice.run('都打开');
+  assert.ok(four.say.startsWith('已打开 4 个'), four.say);
+  assert.ok(four.say.includes('资料1.pptx'));
+  assert.equal(four.items.length, 4);
+  await batchVoice.dispose();
+
+  const partial = fixture({ completion: { delivery: delivery('done', '已打开。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'partial', completed: 1, results: [{ status: 'open_requested', targetType: 'file', name: '资料1.pptx', folder: '/Users/s/Documents/工作' }], failure: { code: 'STALE_CANDIDATE' } } } }] } });
+  const partialVoice = createVoiceSession({ ctx: partial.ctx });
+  const one = await partialVoice.run('打开两个');
+  assert.ok(one.say.includes('没成功'), one.say);
+  await partialVoice.dispose();
+
+  // Revealing names the files and says Finder, not "opened".
+  const reveal = fixture({ completion: { delivery: delivery('done', '已显示。'), operations: [{ name: 'workfiles_open', value: { format: FORMAT, action: 'open', ok: true, data: { status: 'reveal_requested', candidate: file } } }] } });
+  const revealVoice = createVoiceSession({ ctx: reveal.ctx });
+  const shown = await revealVoice.run('在访达里显示');
+  assert.equal(shown.say, '已在访达中显示《e-bot-panel.html》。');
+  await revealVoice.dispose();
+});
