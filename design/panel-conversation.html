@@ -123,14 +123,33 @@
   .icon svg{ width:15px; height:15px }
 
   /* ---------------- thread ---------------- */
+  .thread-wrap{ position:relative; z-index:1; display:grid; min-height:0; margin:6px 0 0 }
   .thread{
-    position:relative; z-index:1; display:grid; gap:12px; align-content:end;
-    min-height:0; overflow:hidden auto; padding:4px 2px 10px 1px; margin:6px 0 0;
-    scrollbar-width:none; opacity:0; transition:opacity .3s var(--ease);
+    position:relative; display:grid; gap:12px; align-content:start;
+    min-height:0; overflow:hidden auto; padding:4px 2px 10px 1px;
+    scrollbar-width:thin; scrollbar-color:var(--f-hair) transparent;
+    opacity:0; transition:opacity .3s var(--ease);
   }
   .thread::-webkit-scrollbar{ display:none }
   .win[data-mode="thread"] .thread{ opacity:1 }
-  .thread[data-fade="top"]{ -webkit-mask:linear-gradient(#0000, #000 18px); mask:linear-gradient(#0000, #000 18px) }
+  /* A clipped edge always says so: the fade hints, the pill states it. */
+  .thread[data-fade="top"]{ -webkit-mask:linear-gradient(#0000, #000 20px); mask:linear-gradient(#0000, #000 20px) }
+  .thread[data-fade="bottom"]{ -webkit-mask:linear-gradient(#000 0 calc(100% - 22px), #0000); mask:linear-gradient(#000 0 calc(100% - 22px), #0000) }
+  .thread[data-fade="both"]{ -webkit-mask:linear-gradient(#0000, #000 20px, #000 calc(100% - 22px), #0000); mask:linear-gradient(#0000, #000 20px, #000 calc(100% - 22px), #0000) }
+  /* A clipped edge always says so, and the hint never covers the text it is about.
+     Two to four words, one chevron, always visible while content is out of view. */
+  .more{
+    display:flex; align-items:center; gap:4px; padding:3px 8px 3px 9px; margin-right:2px; border-radius:999px;
+    border:1px solid var(--f-hair); background:transparent; color:var(--f-ink-2);
+    font:inherit; font-size:11px; font-variant-numeric:tabular-nums; cursor:pointer;
+    transition:background .16s var(--ease), color .16s var(--ease);
+  }
+  .more[data-edge="top"]{ flex-direction:row-reverse; padding:3px 9px 3px 8px }
+  .more[data-edge="top"] svg{ transform:rotate(180deg) }
+  .more[hidden]{ display:none }
+  .more:hover{ background:var(--f-hover); color:var(--f-ink) }
+  .more svg{ width:12px; height:12px }
+  .win[data-mode="idle"] .more{ display:none }
 
   .turn{ display:grid; gap:6px; min-width:0; animation:turn-in .34s var(--ease-out) both }
   @keyframes turn-in{ from{ opacity:0; transform:translateY(6px) } to{ opacity:1; transform:none } }
@@ -210,6 +229,7 @@
     <button class="ghost" id="play" aria-pressed="false">播放演示</button>
     <button class="ghost" id="step">下一步</button>
     <button class="ghost" id="reset">重置</button>
+    <button class="ghost" id="long">长列表</button>
     <div class="seg" role="group" aria-label="外观">
       <button data-wall="light" aria-pressed="true">浅色壁纸</button>
       <button data-wall="dark">深色壁纸</button>
@@ -227,13 +247,19 @@
         <span id="statusSub">例如：最近看过的关于环润讯的推文</span>
       </div>
       <div class="acts">
+        <button class="more" id="more" type="button" hidden title="滚动到还看不见的那一段">
+          <span id="moreLabel">还有内容</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
         <button class="icon" title="收起" aria-label="收起">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10l6 6 6-6"/></svg>
         </button>
       </div>
     </div>
 
-    <div class="thread" id="thread" aria-live="polite"></div>
+    <div class="thread-wrap">
+      <div class="thread" id="thread" aria-live="polite"></div>
+    </div>
 
     <div class="compose">
       <button class="mic" id="mic" data-state="idle">
@@ -417,6 +443,36 @@ function ageTurns() {
 }
 function scrollToEnd() { thread.scrollTop = thread.scrollHeight; }
 
+/** The card grows first; only when it is at its cap do we scroll — and then the clipped
+ * edge is always announced: a fade plus a pill that says how many turns are still below. */
+function syncOverflow() {
+  const max = thread.scrollHeight - thread.clientHeight;
+  const top = thread.scrollTop > 4;
+  const bottom = max > 4 && thread.scrollTop < max - 4;
+  thread.dataset.fade = top && bottom ? 'both' : bottom ? 'bottom' : top ? 'top' : 'off';
+  const rows = [...thread.children];
+  const viewTop = thread.scrollTop, viewBottom = thread.scrollTop + thread.clientHeight;
+  const belowCount = rows.filter(turn => turn.offsetTop + turn.offsetHeight > viewBottom + 4).length;
+  const aboveCount = rows.filter(turn => turn.offsetTop < viewTop - 4).length;
+  const more = document.getElementById('more');
+  const label = document.getElementById('moreLabel');
+  // Prefer the forward direction; if the user is already at the end, point at the history.
+  if (belowCount > 0) {
+    more.dataset.edge = 'bottom';
+    label.textContent = `还没看完 · 还有 ${belowCount} 段`;
+    more.hidden = false;
+  } else if (aboveCount > 0) {
+    more.dataset.edge = 'top';
+    label.textContent = `上面还有 ${aboveCount} 段`;
+    more.hidden = false;
+  } else { more.hidden = true; }
+}
+thread.addEventListener('scroll', syncOverflow, { passive: true });
+document.getElementById('more').addEventListener('click', () => {
+  const edge = document.getElementById('more').dataset.edge;
+  thread.scrollBy({ top: (edge === 'top' ? -1 : 1) * Math.max(80, thread.clientHeight * 0.8), behavior: 'smooth' });
+});
+
 /* The card height follows the conversation, capped; the real window would follow it. */
 function fit() {
   const mode = thread.children.length ? 'thread' : 'idle';
@@ -430,17 +486,21 @@ function fit() {
   const content = turns.reduce((sum, node) => sum + box(node), 0) + 12 * Math.max(0, turns.length - 1);
   const wanted = Math.min(380, Math.max(200, Math.round(chrome + content)));
   win.style.setProperty('--h', `${wanted}px`);
-  requestAnimationFrame(() => {
-    const overflow = thread.scrollHeight > thread.clientHeight + 1;
-    thread.dataset.fade = overflow ? 'top' : 'off';
-    scrollToEnd();
-  });
+  requestAnimationFrame(() => { scrollToEnd(); syncOverflow(); });
 }
 
 /* ---------------------------------------------------------------- script */
 const TWEETS = [
   { type: 'LINK', kind: 'link', name: 'X 上的 环润讯观察：“环润讯第三次架构调整：把模型调度和 Agent 运行时分开了”', meta: 'x.com · 09:12' },
   { type: 'LINK', kind: 'link', name: 'X 上的 数据老李：“看完环润讯这份千卡集群复盘，最有价值的是失败任务那一段”', meta: 'x.com · 09:20' },
+];
+const MANY = [
+  { type: 'PPT', kind: 'path', name: '环润讯_第三次架构调整_对外版', meta: '课题/环润讯 · 11-15' },
+  { type: 'DOC', kind: 'path', name: '环润讯千卡集群复盘要点', meta: '课题/环润讯 · 11-15' },
+  { type: 'PDF', kind: 'path', name: '环润讯 2026 Q3 财务摘要', meta: '资料/研报 · 11-14' },
+  { type: 'XLS', kind: 'path', name: '环润讯集群利用率周报', meta: '课题/数据 · 11-14' },
+  { type: 'MD', kind: 'path', name: '环润讯访谈笔记（10 月）', meta: '课题/访谈 · 11-13' },
+  { type: 'LINK', kind: 'link', name: 'X 上的 环润讯观察：“第三次架构调整：把模型调度和 Agent 运行时分开了”', meta: 'x.com · 09:12' },
 ];
 const steps = [];
 steps.push(async () => { state.status = 'listening'; setOrb('listen'); mic.dataset.state = 'listening'; micLabel.textContent = '我在听 · 停顿 1.1 秒自动提交'; hint.innerHTML = '说完自动提交；再按一次 <kbd>⌘⇧Space</kbd> 立即结束'; mount(); });
@@ -470,6 +530,36 @@ steps.push(async () => {
   mount();
 });
 
+/** Long result: the same card, at its height cap, with the clipped bottom announced. */
+async function longScenario() {
+  document.getElementById('reset').click();
+  state.status = 'listening'; setOrb('listen'); mic.dataset.state = 'listening';
+  micLabel.textContent = '我在听 · 停顿 1.1 秒自动提交'; mount();
+  await wait(600);
+  addUser('帮我找一下最近关于环润讯的资料，标题我记不清了。');
+  mount(); await wait(600);
+  state.status = 'thinking'; setOrb('think'); micLabel.textContent = '正在找…'; await wait(700);
+  const bot = addBot('找到 6 份和环润讯有关的资料，按时间排序：');
+  addRows(bot, MANY);
+  state.status = 'found'; setOrb('hold');
+  mic.dataset.state = 'idle'; micLabel.textContent = '按 ⌘⇧Space 接着说';
+  hint.innerHTML = '往下滑可以先看后面的；也可以直接说“打开第三份”';
+  mount();
+  await wait(700);
+  // A second exchange pushes the card to its cap, which is the case worth showing.
+  addUser('再看看财务相关的。');
+  mount(); await wait(500);
+  const bot2 = addBot('又找到 4 份，和前一份放在同一条时间线上：');
+  addRows(bot2, [
+    { type: 'PDF', kind: 'path', name: '环润讯 2026 Q3 财务摘要（签字版）', meta: '资料/研报 · 11-14' },
+    { type: 'XLS', kind: 'path', name: '环润讯集群成本测算 v3', meta: '课题/数据 · 11-13' },
+    { type: 'DOC', kind: 'path', name: '环润讯采购合同要点摘录', meta: '课题/合同 · 11-12' },
+    { type: 'PPT', kind: 'path', name: '环润讯复盘汇报（内部）', meta: '课题/汇报 · 11-12' },
+  ]);
+  mount();
+  await wait(120); fit();
+}
+
 let cursor = 0;
 let playing = false;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -495,6 +585,7 @@ document.getElementById('play').addEventListener('click', async event => {
   while (playing && cursor < steps.length) { await playStep(); await wait(650); }
   playing = false; event.currentTarget.setAttribute('aria-pressed', 'false');
 });
+document.getElementById('long').addEventListener('click', () => { longScenario(); });
 document.getElementById('reset').addEventListener('click', () => {
   playing = false; cursor = 0; thread.replaceChildren(); state.status = 'idle';
   setOrb('idle'); mic.dataset.state = 'idle'; micLabel.textContent = '按 ⌘⇧Space 接着说';
