@@ -14,7 +14,7 @@
 | --- | --- |
 | 工具 | `workfiles_search` |
 | 支持的类别 | `presentation`（pptx/ppt）、`document`（docx/doc/rtf）、`spreadsheet`（xlsx/xls/csv）、`pdf`、`text`（txt/md/html/htm）、`all` |
-| 匹配来源 | 文件名、所在文件夹名、以及（`content: true` 时）有限正文 |
+| 匹配来源 | 文件名、所在文件夹名；**名字都对不上时自动查正文**——先问 Spotlight 的 `kMDItemTextContent` 正文索引（每个根目录每个词一次，最多两个词），再在预算内读取候选正文（最多 30 份）。`content: true` 可以强制在有名字命中时也查正文 |
 | 排序 | `relevance`（默认）或 `modified`（按真实 mtime） |
 | 收窄条件 | `folder`（限定的子目录）、`modifiedAfter` / `modifiedBefore`、`limit ≤ 20` |
 | 范围 | 只在你于「资料助手」面板勾选的文件夹内；不跟随符号链接逃逸；跳过 `node_modules`、`.git`、`Library`、`__pycache__`、`.Trash` 等；忽略隐藏文件和 `~$` 锁文件 |
@@ -27,8 +27,9 @@
 | | |
 | --- | --- |
 | 工具 | `workfiles_inspect` |
-| 真读正文 | `pptx`、`docx`（按页/段落抽文本）、`txt`、`md`、`csv` |
-| 只读名字 | `pdf`、`rtf`、`doc`、`xls`、`html` |
+| 真读正文 | `pptx`、`docx`（按页/段落抽文本）、`txt`、`md`、`csv`：自己解析 |
+| 真读正文（系统工具） | `html`/`htm`/`rtf`/`doc` 用 macOS 自带 `textutil` 转文本；`pdf`/`ppt`/`xls`/`xlsx` 用 Spotlight 已抽取的正文（`mdls`） |
+| 只读名字 | 上面那些取不到正文时（未索引、无文本层、扫描件 PDF），明确说"只有名称、目录和修改时间"，不当成"没有内容" |
 | 上限 | 单次最多 30 个文件、单文件 32 MB、抽取 30000 字符、返回 8000 字符、PPTX 最多 10 页 |
 
 正文一律标记为「不可信数据」，不会被当成指令执行。

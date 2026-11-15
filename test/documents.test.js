@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createDocumentEngine, isInside, termsFor } from '../lib/documents.js';
-import { createNativeRunner, spotlightCandidates, spotlightQuery } from '../lib/native.js';
+import { createNativeRunner, spotlightCandidates, spotlightContentCandidates, spotlightContentQuery, spotlightQuery } from '../lib/native.js';
 import { LocalTestFilesystem, temporary, textFile } from './helpers.js';
 const exec = promisify(execFile);
 function engineFor(root, extra = {}) {
@@ -133,14 +133,28 @@ test('malformed Office content is reported as unreadable, not no match', async t
   assert.equal(result.coverage.contentFailures, 1);
   assert.ok(result.warnings.some(item => item.includes('正文无法读取')));
 });
-test('content budget is visible and no document bytes are read by default', async t => {
+test('a name match answers the query without reading any body', async t => {
+  const root = await temporary(t); await textFile(root, '独特短语_命名.txt', '无关正文');
+  const { engine, provider } = engineFor(root);
+  const found = await engine.search({ query: '独特短语', kind: 'text' });
+  assert.equal(found.candidates.length, 1);
+  assert.equal(found.coverage.contentFilesRead, 0);
+  assert.equal(found.coverage.contentAutoRead, false);
+  assert.equal(provider.reads.length, 0, 'metadata search must not read document bytes');
+});
+test('a body-only match is found without an extra step, inside the read budget', async t => {
   const root = await temporary(t); await textFile(root, '线索.txt', '正文独特短语'); await textFile(root, '第二份.txt', '正文独特短语');
   const { engine, provider } = engineFor(root, { limits: { maxContentFiles: 1 } });
+  // No candidate name contains the term, so the plugin reads bodies instead of giving up.
   const first = await engine.search({ query: '独特短语', kind: 'text' });
-  assert.equal(first.candidates.length, 0); assert.equal(provider.reads.length, 0);
+  assert.equal(first.coverage.contentAutoRead, true);
+  assert.equal(first.coverage.contentFilesRead, 1);
+  assert.equal(first.candidates.length, 1);
+  assert.ok(provider.reads.length >= 1);
+  assert.ok(first.warnings.some(item => item.includes('正文仅检查')));
   const second = await engine.search({ query: '独特短语', kind: 'text', content: true });
-  assert.equal(second.candidates.length, 1); assert.equal(second.coverage.contentFilesRead, 1);
-  assert.ok(second.warnings.some(item => item.includes('正文仅检查')));
+  assert.equal(second.coverage.contentRequested, true);
+  assert.equal(second.candidates.length, 1);
 });
 test('cancellation stops before scanning', async t => {
   const root = await temporary(t); const { engine, provider } = engineFor(root);
@@ -234,4 +248,63 @@ test('a local HTML page is a first-class text-kind candidate and can be revealed
   assert.equal(revealed.status, 'reveal_requested');
   assert.equal(revealed.folder, path.resolve(root));
   assert.deepEqual(calls.at(-1), ['/usr/bin/open', '-R', path.join(root, '高铁方案_原型.html')]);
+});
+
+test('the system content index is queried as a bounded, escaped body search', async () => {
+  const query = spotlightContentQuery(['机器人"*', '表情'], ['html', 'pdf']);
+  assert.ok(query.includes('kMDItemTextContent == "*机器人\\"\\**"cd'));
+  assert.ok(query.includes('kMDItemFSName == "*.html"cd'));
+  const calls = [];
+  const result = await spotlightContentCandidates(async argv => { calls.push(argv); return { stdout: '/a/稿子.html\0', truncated: false }; }, '/a', ['机器人'], ['html']);
+  assert.deepEqual(result.paths, ['/a/稿子.html']);
+  assert.deepEqual(calls[0].slice(0, 4), ['/usr/bin/mdfind', '-0', '-onlyin', '/a']);
+  const partial = await spotlightContentCandidates(async () => ({ stdout: 'cut\0/a/real.html\0tail', truncated: true }), '/a', [], ['html']);
+  assert.deepEqual(partial.paths, ['/a/real.html']); assert.equal(partial.truncated, true);
+});
+
+test('a body-only file is surfaced by the system content index with content evidence', async t => {
+  const root = await temporary(t);
+  const target = await textFile(root, 'e-bot-panel.html', '<title>机器人表情</title>');
+  // The name index returns nothing; the content index returns the file.
+  const native = async argv => {
+    if (argv[0] === '/usr/bin/mdfind' && argv.join(' ').includes('kMDItemTextContent')) return { stdout: `${target}\0`, truncated: false };
+    return { stdout: '', truncated: false };
+  };
+  const engine = createDocumentEngine({ fs: new LocalTestFilesystem(), roots: () => [root], runNative: native, platform: 'darwin' });
+  const result = await engine.search({ query: '机器人 表情', kind: 'text' });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].name, 'e-bot-panel.html');
+  assert.deepEqual(result.candidates[0].match.sources, ['content']);
+  assert.deepEqual([...result.candidates[0].match.matchedTerms].sort(), ['机器人', '表情'].sort());
+  assert.equal(result.coverage.contentIndexedMatches, 1);
+});
+
+test('system text extraction backs body reads for html and pdf without new parsers', async t => {
+  const root = await temporary(t);
+  await textFile(root, '稿子.html', '<title>机器人表情</title>');
+  await textFile(root, '报告.pdf', 'binary');
+  const argvSeen = [];
+  const native = async argv => {
+    argvSeen.push(argv);
+    if (argv[0] === '/usr/bin/textutil') return { stdout: '页面正文：机器人表情', truncated: false };
+    if (argv[0] === '/usr/bin/mdls') return { stdout: 'PDF 正文：高铁方案', truncated: false };
+    return { stdout: '', truncated: false };
+  };
+  const engine = createDocumentEngine({ fs: new LocalTestFilesystem(), roots: () => [root], runNative: native, platform: 'darwin' });
+  const found = await engine.search({ query: '页面正文', kind: 'text' });
+  const html = found.candidates.find(candidate => candidate.extension === 'html');
+  assert.ok(html, 'the html candidate must be found');
+  const inspected = await engine.inspect(html);
+  assert.equal(inspected.text, '页面正文：机器人表情');
+  assert.equal(inspected.candidate.contentStatus, 'read');
+  assert.ok(argvSeen.some(argv => argv[0] === '/usr/bin/textutil' && argv.includes('-stdout')));
+  const pdf = (await engine.search({ query: '报告', kind: 'pdf' })).candidates[0];
+  const read = await engine.inspect(pdf);
+  assert.equal(read.text, 'PDF 正文：高铁方案');
+  assert.ok(argvSeen.some(argv => argv[0] === '/usr/bin/mdls' && argv[1] === '-name' && argv[2] === 'kMDItemTextContent'));
+  // A system command failure is reported as unreadable, never as "no match".
+  const failing = createDocumentEngine({ fs: new LocalTestFilesystem(), roots: () => [root], platform: 'darwin', runNative: async () => { throw Object.assign(new Error('boom'), { code: 'NATIVE_COMMAND_FAILED' }); } });
+  const empty = await failing.inspect(pdf);
+  assert.equal(empty.text, '');
+  assert.equal(empty.candidate.contentStatus, 'unsupported');
 });
