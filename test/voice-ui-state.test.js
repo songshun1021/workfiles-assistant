@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   PHASE_LABELS, SHORT_FEEDBACK_MAX_CHARACTERS, SHORT_FEEDBACK_DISMISS_MS,
   selectPanelStatus, selectPanelEcho, feedbackKey, updateFeedbackRetention, shouldAutoDismissFeedback,
-  PANEL_SIZES, panelDensity, panelActivity,
+  PANEL_SIZES, panelDensity, panelActivity, shouldAutoPrepare,
 } from '../voice-ui/view-state.js';
 
 const idle = Object.freeze({ hasBridge: true, activationId: 'activation-a', phase: 'listening' });
@@ -117,9 +117,9 @@ test('presentation helpers do not mutate Host state or grant any microphone/brid
 });
 
 test('the panel shrinks only while a task is really running, and reports its activity state', () => {
-  assert.deepEqual(PANEL_SIZES.full, { width: 620, height: 244 });
-  for (const phase of ['preparing', 'transcribing', 'working']) assert.equal(panelDensity(phase), 'compact');
-  for (const phase of ['ready', 'listening', 'question', 'done', 'error']) assert.equal(panelDensity(phase), 'full');
+  assert.deepEqual(PANEL_SIZES.full, { width: 620, height: 200 });
+  for (const phase of ['preparing', 'listening', 'transcribing', 'working']) assert.equal(panelDensity(phase), 'compact');
+  for (const phase of ['ready', 'question', 'done', 'error']) assert.equal(panelDensity(phase), 'full');
   assert.equal(panelActivity('listening', true), 'listening');
   assert.equal(panelActivity('working'), 'working');
   assert.equal(panelActivity('transcribing'), 'working');
@@ -135,4 +135,12 @@ test('the native window sizes and the pure density policy cannot drift apart', a
     const expected = `PANEL_${name.toUpperCase()} = Object.freeze({ width: ${size.width}, height: ${size.height} })`;
     assert.ok(source.includes(expected), expected);
   }
+});
+
+test('a voice gesture prepares itself once per activation instead of asking for a click', () => {
+  assert.equal(shouldAutoPrepare({ phase: 'preparing', canPrepare: true, captureIntent: true, activationId: 'a' }), true);
+  assert.equal(shouldAutoPrepare({ phase: 'preparing', canPrepare: true, captureIntent: true, activationId: 'a', prepared: 'a' }), false);
+  assert.equal(shouldAutoPrepare({ phase: 'preparing', canPrepare: true, captureIntent: false, activationId: 'a' }), false);
+  assert.equal(shouldAutoPrepare({ phase: 'working', canPrepare: true, captureIntent: true, activationId: 'a' }), false);
+  assert.equal(shouldAutoPrepare({ phase: 'ready', canPrepare: false, captureIntent: true, activationId: 'a' }), false);
 });

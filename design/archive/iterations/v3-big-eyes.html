@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Bot · 迭代 2</title>
+<style>
+  /* Iteration 2 — fixes from the frame audit:
+     1) eyes are drawn (soft edges + pupils) instead of punched holes (no jagged stair-steps)
+     2) the dot grid never warps; only the whole ball translates, so no moiré shimmer
+     3) blue is a rim light (~8% of pixels), not half the ball
+     4) paper texture uses the same 4px cell and is masked out under the ball
+     5) contact shadow grounds the ball; finish keeps a lower smile and a slower fade */
+  :root {
+    color-scheme: light;
+    --ground: #e7e9ee;
+    --paper: #f7f8fa;
+    --paper-2: #edf0f4;
+    --ink: #151a23;
+    --ink-soft: #4a505c;
+    --hair: rgb(21 26 35 / .12);
+    --blue: #4d6bfe;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--ground); }
+
+  .window {
+    position: relative; width: 340px; height: 244px; border-radius: 26px; overflow: hidden;
+    background: radial-gradient(130% 120% at 24% 10%, #ffffff 0%, var(--paper) 48%, var(--paper-2) 100%);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / .9) inset,
+      0 0 0 1px rgb(21 26 35 / .09),
+      0 26px 56px -24px rgb(20 24 35 / .40);
+    transition: transform 320ms var(--ease), opacity 320ms var(--ease), filter 320ms var(--ease);
+  }
+  #paper { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .26; pointer-events: none; }
+  .rim { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / .7), inset 0 -28px 46px -30px rgb(20 24 35 / .22); }
+
+  .controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 2; }
+  .icon-btn {
+    display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+    border: 1px solid var(--hair); border-radius: 50%; background: rgb(255 255 255 / .55);
+    color: var(--ink-soft); cursor: pointer; transition: all 150ms var(--ease);
+  }
+  .icon-btn:hover { background: #fff; color: var(--ink); }
+  .icon-btn:active { transform: scale(.92); }
+  .icon-btn svg { width: 13px; height: 13px; }
+
+  .stage { position: absolute; inset: 0; display: grid; place-items: center; }
+  #shadow { position: absolute; width: 128px; height: 20px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(21 26 35 / .20), transparent 78%);
+    filter: blur(3px); top: calc(50% + 74px); }
+  #face { display: block; width: 176px; height: 176px; cursor: pointer; }
+
+  .window.leaving { transform: scale(.94); opacity: 0; filter: blur(2px); }
+  @media (prefers-reduced-motion: reduce) { .window { transition: none; } }
+</style>
+</head>
+<body>
+<main class="window listening" id="window" aria-label="语音助手：纸感点阵 + 表情球（迭代 2）">
+  <canvas id="paper" aria-hidden="true"></canvas>
+  <div class="rim" aria-hidden="true"></div>
+
+  <div class="controls">
+    <button class="icon-btn" id="primary" aria-label="开始或停止" title="开始 / 停止">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+    <button class="icon-btn" id="cancel" aria-label="取消" title="取消（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg>
+    </button>
+  </div>
+
+  <div class="stage">
+    <span id="shadow" aria-hidden="true"></span>
+    <canvas id="face" width="176" height="176" role="img" aria-label="机器人表情：收听中"></canvas>
+  </div>
+</main>
+
+<script>
+  const win = document.getElementById('window');
+  const paperCanvas = document.getElementById('paper');
+  const faceCanvas = document.getElementById('face');
+  const shadow = document.getElementById('shadow');
+  const paperCtx = paperCanvas.getContext('2d');
+  const faceCtx = faceCanvas.getContext('2d');
+
+  const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+  const BAYER8 = [
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+  ].map(v => (v + 0.5) / 64);
+
+  const SIZE = 176, HALF = SIZE / 2, CELL = 4, COLS = Math.ceil(SIZE / CELL);
+  // Iteration 3: eye scale is the only visual variable between compared variants.
+  const EYE = { scale: 1.3, pupil: 3.9, glint: 1.5 };
+  const ratio = Math.min(window.devicePixelRatio || 1, 3);
+  let state = 'listening';
+  let started = performance.now();
+  let dissolve = 0;
+
+  /* Eye geometry: smaller, wider, with pupils — the face reads as a face, not a mask. */
+  function faceFor(time) {
+    const blink = (Math.sin(time * 0.75) + 0.985) > 1.98 ? 0.18 : 1;   // rare, quick blink
+    if (state === 'processing') {
+      return { eyes: [{ x: -0.28, y: 0.04, rx: 0.115 * EYE.scale, ry: 0.028 * EYE.scale }, { x: 0.30, y: 0.04, rx: 0.115 * EYE.scale, ry: 0.028 * EYE.scale }], pupils: null };
+    }
+    if (state === 'done') {
+      return { eyes: [{ x: -0.28, y: 0.06, rx: 0.115 * EYE.scale, ry: 0.085 * EYE.scale, smile: true }, { x: 0.30, y: 0.06, rx: 0.115 * EYE.scale, ry: 0.085 * EYE.scale, smile: true }], pupils: null };
+    }
+    if (state === 'thinking') {
+      return {
+        eyes: [{ x: -0.29, y: -0.015, rx: 0.105 * EYE.scale, ry: 0.135 * EYE.scale }, { x: 0.30, y: -0.015, rx: 0.095 * EYE.scale, ry: 0.115 * EYE.scale }],
+        pupils: [{ x: -0.265, y: -0.075 }, { x: 0.345, y: -0.055 }],   // both look up-right
+      };
+    }
+    return {
+      eyes: [{ x: -0.28, y: 0.02, rx: 0.105 * EYE.scale, ry: 0.135 * EYE.scale * blink }, { x: 0.30, y: 0.02, rx: 0.105 * EYE.scale, ry: 0.135 * EYE.scale * blink }],
+      pupils: [{ x: -0.30, y: 0.02 }, { x: 0.30, y: 0.02 }],
+    };
+  }
+
+  /* Sphere shading. Blue is reserved for the rim light: the ball is ink, with one cool edge. */
+  function shade(nx, ny, nz, time) {
+    const radial = Math.hypot(nx, ny);
+    if (state === 'thinking') {
+      const angle = Math.atan2(ny, nx);
+      const swirl = Math.sin(angle * 2 + radial * 9 - time * 1.4) * 0.10;   // gentle, no ragged edges
+      const lambert = Math.max(0, nx * 0.35 + ny * -0.55 + nz * 0.76);
+      return lambert * 0.86 + swirl + 0.20;
+    }
+    if (state === 'processing') {
+      const band = ((time * 0.6) % 2.6) - 0.8;
+      const scan = Math.max(0, 1 - Math.abs(nx - band) * 3.0);
+      const lambert = Math.max(0, nx * 0.05 + ny * -0.1 + nz * 0.99);
+      return lambert * 0.74 + scan * 0.3 + 0.18;
+    }
+    if (state === 'done') {
+      const fade = Math.max(0, 1 - dissolve);
+      const lambert = Math.max(0, nx * 0.28 + ny * -0.5 + nz * 0.82);
+      return (lambert * 0.72 + 0.24) * fade;
+    }
+    const lx = Math.sin(time * 0.45) * 0.55, ly = -0.62, lz = 0.62;
+    const lambert = Math.max(0, nx * lx + ny * ly + nz * lz);
+    const ripple = Math.sin(radial * 12 - time * 2.0) * 0.09;
+    return lambert * 0.98 + ripple + 0.15;
+  }
+
+  function drawFace(now) {
+    const time = (now - started) / 1000;
+    if (state === 'done') dissolve = Math.min(1, Math.max(0, time - 1.0) * 0.42);
+    const face = faceFor(time);
+    const bob = state === 'listening' ? Math.sin(time * 1.5) * 1.6 : state === 'processing' ? Math.sin(time * 4) * 0.9 : 0;
+
+    faceCtx.setTransform(1, 0, 0, 1, 0, 0);
+    faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+    faceCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+    // Base disc keeps the silhouette perfectly round; the dither sits on top of it.
+    faceCtx.beginPath();
+    faceCtx.arc(HALF, HALF + bob, HALF - 1, 0, Math.PI * 2);
+    const key = faceCtx.createRadialGradient(HALF - 34, HALF - 40 + bob, 6, HALF, HALF + bob, HALF);
+    key.addColorStop(0, "rgba(96,104,122,0.55)");
+    key.addColorStop(0.55, "rgba(30,36,48,0.15)");
+    key.addColorStop(1, "rgba(12,16,23,0.0)");
+    faceCtx.fillStyle = 'rgba(21,26,35,0.96)';
+    faceCtx.fill();
+    faceCtx.fillStyle = key;
+    faceCtx.fill();
+
+    // Dither texture: white specks on the ink disc (inverse of the old holes approach).
+    for (let gy = 0; gy < COLS; gy++) {
+      for (let gx = 0; gx < COLS; gx++) {
+        const px = gx * CELL + CELL / 2 - HALF, py = gy * CELL + CELL / 2 - HALF;
+        const radius = Math.hypot(px, py);
+        if (radius > HALF - 2) continue;
+        const nz = Math.sqrt(Math.max(0, 1 - (radius / (HALF - 1)) ** 2));
+        const value = Math.min(1, Math.max(0, shade(px / (HALF - 1), py / (HALF - 1), nz, time)));
+        const threshold = BAYER4[(gy % 4) * 4 + (gx % 4)];
+        const lit = value > threshold;
+
+        // Ink dots get denser where the shade is dark; the rim light turns them blue.
+        const angle = Math.atan2(py, px);
+        const rimStrength = Math.max(0, Math.cos(angle + 0.9)) ** 3;      // one soft edge, not an arc
+        const rim = radius > HALF - 16 && rimStrength > 0.18;
+        if (lit && !rim) {
+          faceCtx.fillStyle = `rgba(247,248,250,${(0.16 + 0.24 * value).toFixed(3)})`;
+        } else if (rim) {
+          faceCtx.fillStyle = `rgba(77,107,254,${(0.25 + 0.7 * rimStrength).toFixed(3)})`;
+        } else {
+          continue;
+        }
+        const fade = state === 'done' ? Math.max(0, 1 - dissolve) : 1;
+        faceCtx.globalAlpha = fade;
+        faceCtx.beginPath();
+        faceCtx.arc(gx * CELL + CELL / 2, gy * CELL + CELL / 2 + bob, CELL * 0.42, 0, Math.PI * 2);
+        faceCtx.fill();
+        faceCtx.globalAlpha = 1;
+      }
+    }
+
+    // Eyes: drawn shapes with soft edges (no stair-steps), plus pupils for gaze.
+    const eyeAlpha = state === 'done' ? Math.max(0, 1 - dissolve * 0.9) : 1;
+    for (const eye of face.eyes) {
+      const cx = HALF + eye.x * (HALF - 1), cy = HALF + eye.y * (HALF - 1) + bob;
+      faceCtx.globalAlpha = eyeAlpha;
+      if (eye.smile) {
+        faceCtx.strokeStyle = 'rgba(247,248,250,0.95)';
+        faceCtx.lineWidth = 4.2; faceCtx.lineCap = 'round';
+        faceCtx.beginPath();
+        faceCtx.arc(cx, cy + eye.ry * 40, eye.rx * (HALF - 1), Math.PI * 1.15, Math.PI * 1.85);
+        faceCtx.stroke();
+      } else {
+        faceCtx.fillStyle = 'rgba(247,248,250,0.97)';
+        faceCtx.beginPath();
+        faceCtx.ellipse(cx, cy, eye.rx * (HALF - 1), Math.max(1.4, eye.ry * (HALF - 1)), 0, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+      faceCtx.globalAlpha = 1;
+    }
+    if (face.pupils) {
+      for (const pupil of face.pupils) {
+        const px = HALF + pupil.x * (HALF - 1), py = HALF + pupil.y * (HALF - 1) + bob;
+        faceCtx.fillStyle = 'rgba(21,26,35,0.94)';
+        faceCtx.beginPath();
+        faceCtx.arc(px, py, EYE.pupil, 0, Math.PI * 2);
+        faceCtx.fill();
+        faceCtx.fillStyle = 'rgba(255,255,255,0.92)';
+        faceCtx.beginPath();
+        faceCtx.arc(px - EYE.glint * 0.9, py - EYE.glint, EYE.glint, 0, Math.PI * 2);
+        faceCtx.fill();
+      }
+    }
+
+    shadow.style.transform = `translateY(${bob * 0.6}px) scaleX(${1 + bob * 0.004})`;
+    requestAnimationFrame(drawFace);
+  }
+
+  /* ---------- paper: same 4px cell, masked away under the ball to avoid moiré ---------- */
+  const paper = { buf: document.createElement('canvas'), ctx: null, img: null, cols: 0, rows: 0, cell: 4 };
+  function resizePaper() {
+    const width = Math.floor(win.clientWidth * ratio), height = Math.floor(win.clientHeight * ratio);
+    paperCanvas.width = width; paperCanvas.height = height;
+    paper.cell = Math.max(3, Math.round(4 * ratio));
+    paper.cols = Math.ceil(width / paper.cell); paper.rows = Math.ceil(height / paper.cell);
+    paper.ctx = paperCanvas.getContext('2d', { alpha: true });
+    paper.buf.width = paper.cols; paper.buf.height = paper.rows;
+    paper.bufCtx = paper.buf.getContext('2d');
+    paper.img = paper.bufCtx.createImageData(paper.cols, paper.rows);
+  }
+
+  function drawPaper(now) {
+    const time = (now - started) / 1000;
+    const w = paperCanvas.width, h = paperCanvas.height;
+    const cx = w / 2, cy = h / 2, radius = (SIZE / 2 + 6) * ratio;
+    const data = paper.img.data;
+    let index = 0;
+    for (let y = 0; y < paper.rows; y++) {
+      for (let x = 0; x < paper.cols; x++) {
+        const px = x * paper.cell, py = y * paper.cell;
+        const inside = Math.hypot(px - cx, py - cy) < radius;   // keep the ball zone clean
+        const nx = px / w, ny = py / h;
+        const edge = Math.min(1, Math.max(0, Math.hypot(nx - 0.5, ny - 0.5) * 2.6 - 0.45));
+        const base = 0.5 + 0.5 * Math.sin(Math.hypot(nx - 0.5, ny - 0.5) * 14 - time * 0.5);
+        const value = Math.min(1, Math.max(0, (base * 0.7 + 0.2) * edge));
+        const on = !inside && value > BAYER8[(y % 8) * 8 + (x % 8)];
+        data[index++] = 24; data[index++] = 29; data[index++] = 38;
+        data[index++] = on ? 92 : 0;
+      }
+    }
+    paper.bufCtx.putImageData(paper.img, 0, 0);
+    paper.ctx.clearRect(0, 0, w, h);
+    paper.ctx.imageSmoothingEnabled = false;
+    paper.ctx.drawImage(paper.buf, 0, 0, paper.cols, paper.rows, 0, 0, paper.cols * paper.cell, paper.rows * paper.cell);
+    requestAnimationFrame(drawPaper);
+  }
+
+  const label = { listening: '收听中', thinking: '思考中', processing: '执行中', done: '已完成' };
+  function setState(next) {
+    state = next;
+    started = performance.now();
+    dissolve = 0;
+    win.className = `window ${next}`;
+    faceCanvas.setAttribute('aria-label', `机器人表情：${label[next]}`);
+    win.classList.remove('leaving');
+    if (next === 'done') setTimeout(() => win.classList.add('leaving'), 2400);
+  }
+  const order = ['listening', 'thinking', 'processing', 'done'];
+
+  document.getElementById('face').addEventListener('click', () => setState(order[(order.indexOf(state) + 1) % order.length]));
+  addEventListener('keydown', event => {
+    const map = { '1': 'listening', '2': 'thinking', '3': 'processing', '4': 'done' };
+    if (map[event.key]) setState(map[event.key]);
+    if (event.key === 'Escape') setState('done');
+    if (event.key.toLowerCase() === 'r') setState('listening');
+  });
+  document.getElementById('cancel').addEventListener('click', () => setState('done'));
+  document.getElementById('primary').addEventListener('click', () => setState(state === 'listening' ? 'thinking' : 'listening'));
+  addEventListener('resize', resizePaper);
+
+  faceCanvas.width = SIZE * ratio; faceCanvas.height = SIZE * ratio;
+  faceCanvas.style.width = `${SIZE}px`; faceCanvas.style.height = `${SIZE}px`;
+  resizePaper();
+
+  setState('listening');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { drawFace(performance.now()); drawPaper(performance.now()); }
+  else { requestAnimationFrame(drawFace); requestAnimationFrame(drawPaper); }
+</script>
+</body>
+</html>

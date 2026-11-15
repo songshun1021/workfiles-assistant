@@ -6,7 +6,7 @@ DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处�
 
 当前固定版本 **0.5.1**，目标宿主 **DSH 0.2.2-rc.3 / macOS arm64**。这是本地链接安装的插件，不做通用分发包。
 
-1. 把本仓库克隆到本地固定位置，**不要移动**：`git clone <repo> ~/Documents/DSHarness/workfiles-assistant`。
+1. 把本仓库克隆到本地固定位置，**不要移动**：`git clone <repo> ~/Developer/workfiles-assistant`。
 2. 安装依赖：在该目录执行 `pnpm install`。
 3. 构建桌面语音组件（每台机器各自构建，产物在本机缓存里，不进仓库）：
    `pnpm run build:native`；随后可用 `node --test test/*.test.js` 自检。
@@ -86,6 +86,30 @@ DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处�
 
 原生采集具有节点／深度／时间／输出／进程退出预算；不会失败后退回全树或 OCR。语音小窗自有 Electron 组件保留宿主／副本／11 个冻结资源哈希校验；只有相关资源或宿主变动才需要在批准缓存中重建，不通过版本豁免绕过。原 App 不改／不重签。
 
-源码为本地链接安装，**不要移动或删除本项目目录**。参考 [能力评估](<./MACOS_CAPABILITIES.md>)、[语音协议](<./VOICE_PROTOCOL.md>)、[原生说明](<./native/README.md>)、[开源选择](<./OPEN_SOURCE.md>)、[第三方声明](<./THIRD_PARTY_NOTICES.md>)、[验收记录](<./VERIFICATION.md>)。
+源码为本地链接安装，**不要移动或删除本项目目录**（DSH 记录的是这个绝对路径；要换位置就 `git clone` 到新位置后重新 `link:` 安装）。参考 [能力评估](<./MACOS_CAPABILITIES.md>)、[语音协议](<./VOICE_PROTOCOL.md>)、[原生说明](<./native/README.md>)、[开源选择](<./OPEN_SOURCE.md>)、[第三方声明](<./THIRD_PARTY_NOTICES.md>)、[验收记录](<./VERIFICATION.md>)。
 
 单元、假进程、纯 VM JXA、接口注册与签名检查，均不等于实际 macOS 桥接、窗口／网页兼容、AX 权限、物理快捷键、麦克风或已认证 GUI 点击验收；实测与人工剩余项分别记录，不把模拟通过冒充实机通过。
+
+## 项目结构与开发
+
+自包含工程：插件源码、原生组件源码、源码级测试和设计稿都在同一个仓库里。
+
+| 路径 | 内容 |
+| --- | --- |
+| `index.js` `client.js` `voice.js` `lib/` | Harness 插件本体（Host 侧、Client 侧、语音协调、语义校正） |
+| `voice-ui/` | 原生语音小窗页面（`index.html` / `panel.js` / `panel.css` / `audio.js` / `view-state.js`） |
+| `native/` | 小窗的 Electron 组件源码、`motion.mjs` 动画几何、构建脚本与线路协议 |
+| `test/` | 纯 Node 测试，不需要 GUI、麦克风或真实 DSH 会话 |
+| `locale/` `cordis.patch.yml` | 文案与插件补丁清单 |
+| `design/` | 收敛后的液体玻璃面板设计稿 `panel-flow-blue.html` 与历史概念稿 |
+| `.native/` | 本机构建记录（不入库，每台机器各自生成） |
+
+常用命令：
+
+```sh
+pnpm run check            # 逐文件语法检查
+node --test 'test/*.test.js'
+pnpm run build:native     # 构建桌面语音组件到 ~/Library/Caches/DeepSeekHarness/WorkfilesVoice
+```
+
+**改动 `voice-ui/` 或 `native/` 之后必须重新 `pnpm run build:native`。** 小窗启动前会校验 11 个冻结资源的哈希：源码改了而组件没重建时，快捷键会静默失效并提示「语音界面源码已改变」——这是刻意的闸门，不是故障。

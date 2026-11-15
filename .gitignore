@@ -15,3 +15,7 @@ node_modules/
 # macOS noise.
 .DS_Store
 Icon?
+
+# Development baselines and review diffs kept as local references only.
+.*-baseline-*/
+*.diff

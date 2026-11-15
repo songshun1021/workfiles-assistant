@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Bot · 迭代 4（A 方块眼 · 更灵动 · 纯灰阶）</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ground: #e7e9ee;
+    --paper: #f7f8fa;
+    --paper-2: #edf0f4;
+    --ink: #14181f;
+    --ink-soft: #4a505c;
+    --hair: rgb(20 24 31 / .12);
+    --ease: cubic-bezier(.22,.61,.36,1);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--ground); }
+
+  .window {
+    position: relative; width: 340px; height: 244px; border-radius: 26px; overflow: hidden;
+    background: radial-gradient(130% 120% at 24% 10%, #ffffff 0%, var(--paper) 48%, var(--paper-2) 100%);
+    box-shadow: 0 1px 0 rgb(255 255 255 / .9) inset, 0 0 0 1px rgb(20 24 31 / .09), 0 26px 56px -24px rgb(20 24 31 / .40);
+    transition: transform 320ms var(--ease), opacity 320ms var(--ease), filter 320ms var(--ease);
+  }
+  #paper { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .26; pointer-events: none; }
+  .rim { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / .7), inset 0 -28px 46px -30px rgb(20 24 31 / .22); }
+
+  .controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 2; }
+  .icon-btn {
+    display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+    border: 1px solid var(--hair); border-radius: 50%; background: rgb(255 255 255 / .55);
+    color: var(--ink-soft); cursor: pointer; transition: all 150ms var(--ease);
+  }
+  .icon-btn:hover { background: #fff; color: var(--ink); }
+  .icon-btn:active { transform: scale(.92); }
+  .icon-btn svg { width: 13px; height: 13px; }
+
+  .stage { position: absolute; inset: 0; display: grid; place-items: center; }
+  #shadow { position: absolute; width: 126px; height: 18px; border-radius: 50%; top: calc(50% + 76px);
+    background: radial-gradient(closest-side, rgb(20 24 31 / .22), transparent 78%); filter: blur(3px); }
+  #face { display: block; width: 176px; height: 176px; cursor: pointer; }
+
+  .window.leaving { transform: scale(.94); opacity: 0; filter: blur(2px); }
+  @media (prefers-reduced-motion: reduce) { .window { transition: none; } }
+</style>
+</head>
+<body>
+<main class="window listening" id="window" aria-label="语音助手：纸感点阵 + LED 方块眼">
+  <canvas id="paper" aria-hidden="true"></canvas>
+  <div class="rim" aria-hidden="true"></div>
+  <div class="controls">
+    <button class="icon-btn" id="primary" aria-label="开始或停止" title="开始 / 停止">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+    <button class="icon-btn" id="cancel" aria-label="取消" title="取消（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg>
+    </button>
+  </div>
+  <div class="stage">
+    <span id="shadow" aria-hidden="true"></span>
+    <canvas id="face" width="176" height="176" role="img" aria-label="机器人表情：收听中"></canvas>
+  </div>
+</main>
+
+<script>
+  const win = document.getElementById('window');
+  const paperCanvas = document.getElementById('paper');
+  const faceCanvas = document.getElementById('face');
+  const shadow = document.getElementById('shadow');
+  const paperCtx = paperCanvas.getContext('2d');
+  const faceCtx = faceCanvas.getContext('2d');
+
+  const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+  const BAYER8 = [
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+  ].map(v => (v + 0.5) / 64);
+
+  const SIZE = 176, HALF = SIZE / 2, CELL = 4, COLS = Math.ceil(SIZE / CELL);
+  const ratio = Math.min(window.devicePixelRatio || 1, 3);
+
+  let state = 'listening';
+  let started = performance.now();
+  let dissolve = 0;
+
+  /* ---------------- face engine ----------------
+     The face is made of grid cells (variant A: LED block eyes). Everything is animated
+     with eased targets so states blend instead of snapping: gaze, blink, lid height,
+     lift, arc. Gaze also follows the pointer, which is what makes it feel alive. */
+  const gaze = { x: 0, y: 0, tx: 0, ty: 0, nextAt: 0 };
+  const anim = { lidL: 7, lidR: 7, lift: 0, arc: 0, pupilX: 0, pupilY: 0, bob: 0, squash: 1, tilt: 0 };
+  const target = { lidL: 7, lidR: 7, lift: 0, arc: 0, pupilX: 0, pupilY: 0 };
+  const BLINK = { nextAt: 0, until: 0, double: false };
+
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  function updateTargets(now) {
+    const t = now / 1000;
+    if (state === 'thinking') {
+      target.lidL = 6; target.lidR = 5; target.lift = -1.4; target.arc = 0;
+      target.pupilX = 0.85 + Math.sin(t * 1.7) * 0.5;      // eyes wander while thinking
+      target.pupilY = -1.1 + Math.cos(t * 1.3) * 0.35;
+    } else if (state === 'processing') {
+      target.lidL = 1.6; target.lidR = 1.6; target.lift = 0; target.arc = 0;
+      target.pupilX = Math.sin(t * 9) * 0.5; target.pupilY = 0;
+    } else if (state === 'done') {
+      target.lidL = 1.4; target.lidR = 1.4; target.lift = 0.4; target.arc = 1;
+      target.pupilX = 0; target.pupilY = 0;
+    } else {
+      target.lidL = 7; target.lidR = 7; target.lift = 0; target.arc = 0;
+      // idle saccades: small jumps that look like noticing something
+      if (now > gaze.nextAt) {
+        gaze.tx = (Math.random() - 0.5) * 1.6;
+        gaze.ty = (Math.random() - 0.5) * 1.1;
+        gaze.nextAt = now + 900 + Math.random() * 2200;
+      }
+      target.pupilX = gaze.tx; target.pupilY = gaze.ty;
+    }
+
+    // Blink scheduling: a short close, sometimes a double blink.
+    if (now > BLINK.nextAt && state !== 'done') {
+      BLINK.until = now + 95;
+      BLINK.nextAt = now + 2400 + Math.random() * 3600;
+      if (Math.random() < 0.25) BLINK.double = true;
+    }
+    if (BLINK.double && now > BLINK.until + 120 && now < BLINK.until + 150) {
+      BLINK.until = now + 95; BLINK.double = false;
+    }
+    if (now < BLINK.until) { target.lidL = Math.min(target.lidL, 1); target.lidR = Math.min(target.lidR, 1); }
+  }
+
+  function step(now, dt) {
+    const k = Math.min(1, dt / 90);
+    anim.lidL = lerp(anim.lidL, target.lidL, k);
+    anim.lidR = lerp(anim.lidR, target.lidR, k);
+    anim.lift = lerp(anim.lift, target.lift, k);
+    anim.arc = lerp(anim.arc, target.arc, k);
+    gaze.x = lerp(gaze.x, target.pupilX, Math.min(1, dt / 130));
+    gaze.y = lerp(gaze.y, target.pupilY, Math.min(1, dt / 130));
+    // body: breath + tiny tilt, livelier while busy
+    const t = now / 1000;
+    const speed = state === 'processing' ? 5 : state === 'thinking' ? 2.6 : 1.5;
+    anim.bob = Math.sin(t * speed) * (state === 'listening' ? 2.2 : 1.2);
+    anim.squash = 1 + Math.sin(t * speed * 2) * (state === 'processing' ? 0.012 : 0.006);
+    anim.tilt = Math.sin(t * (speed * 0.6)) * (state === 'thinking' ? 0.035 : 0.012);
+    shadow.style.transform = `translateY(${anim.bob * 0.5}px) scaleX(${1 - anim.bob * 0.004})`;
+  }
+
+  /* Sphere shading: purely monochrome (ink → grey → white specks). */
+  function shade(nx, ny, nz, time) {
+    const radial = Math.hypot(nx, ny);
+    if (state === 'thinking') {
+      const angle = Math.atan2(ny, nx);
+      return Math.max(0, nx * 0.35 + ny * -0.55 + nz * 0.76) * 0.86 + Math.sin(angle * 2 + radial * 9 - time * 1.4) * 0.10 + 0.20;
+    }
+    if (state === 'processing') {
+      const band = ((time * 0.9) % 2.4) - 0.7;
+      const scan = Math.max(0, 1 - Math.abs(nx - band) * 3.2);
+      return Math.max(0, nx * 0.05 + ny * -0.1 + nz * 0.99) * 0.74 + scan * 0.3 + 0.18;
+    }
+    if (state === 'done') {
+      const fade = Math.max(0, 1 - dissolve);
+      return (Math.max(0, nx * 0.28 + ny * -0.5 + nz * 0.82) * 0.72 + 0.24) * fade;
+    }
+    const lx = Math.sin(time * 0.45) * 0.55, ly = -0.62, lz = 0.62;
+    return Math.max(0, nx * lx + ny * ly + nz * lz) * 0.98 + Math.sin(radial * 12 - time * 2.0) * 0.09 + 0.15;
+  }
+
+  let lastFrame = performance.now();
+  function drawFace(now) {
+    const dt = Math.min(48, now - lastFrame); lastFrame = now;
+    const time = (now - started) / 1000;
+    if (state === 'done') dissolve = Math.min(1, Math.max(0, time - 1.1) * 0.45);
+    updateTargets(now); step(now, dt);
+
+    faceCtx.setTransform(1, 0, 0, 1, 0, 0);
+    faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+    faceCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    faceCtx.translate(HALF, HALF + anim.bob);
+    faceCtx.rotate(anim.tilt);
+    faceCtx.scale(1 / anim.squash, anim.squash);
+    faceCtx.translate(-HALF, -HALF);
+
+    const fade = state === 'done' ? Math.max(0, 1 - dissolve) : 1;
+
+    // base disc + key light
+    const key = faceCtx.createRadialGradient(HALF - 32, HALF - 38, 5, HALF, HALF, HALF);
+    key.addColorStop(0, 'rgba(108,116,132,0.5)');
+    key.addColorStop(0.55, 'rgba(30,36,48,0.14)');
+    key.addColorStop(1, 'rgba(12,16,23,0)');
+    faceCtx.beginPath();
+    faceCtx.arc(HALF, HALF, HALF - 1, 0, Math.PI * 2);
+    faceCtx.fillStyle = 'rgba(20,24,31,0.96)';
+    faceCtx.fill();
+    faceCtx.fillStyle = key;
+    faceCtx.fill();
+
+    // dithered specks (mono)
+    const mid = Math.floor(COLS / 2);
+    const eyeCells = new Set();
+    const pupilCells = new Set();
+    const eyes = [
+      { cx: -6, h: anim.lidL, lift: anim.lift },
+      { cx: 6, h: anim.lidR, lift: anim.lift },
+    ];
+    for (const eye of eyes) {
+      const height = Math.max(1, Math.round(eye.h));
+      const top = Math.round(eye.lift) - Math.floor(height / 2);
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = 0; dy < height; dy++) {
+          eyeCells.add(`${mid + eye.cx + dx},${mid + top + dy}`);
+        }
+      }
+      if (anim.arc > 0.5) {
+        // happy arc: drop the bottom row(s), keep the top two, raise the outer cells
+        for (let dx = -2; dx <= 2; dx++) eyeCells.delete(`${mid + eye.cx + dx},${mid + top + height - 1}`);
+      }
+      const px = Math.round(gaze.x), py = Math.round(gaze.y);
+      const pxx = mid + eye.cx + px, pyy = mid + top + Math.floor(height / 2) + py;
+      pupilCells.add(`${pxx},${pyy}`);
+    }
+
+    for (let gy = 0; gy < COLS; gy++) {
+      for (let gx = 0; gx < COLS; gx++) {
+        const px = gx * CELL + CELL / 2 - HALF, py = gy * CELL + CELL / 2 - HALF;
+        const radius = Math.hypot(px, py);
+        if (radius > HALF - 2) continue;
+        if (eyeCells.has(`${gx},${gy}`) || pupilCells.has(`${gx},${gy}`)) continue;   // painted as panels below
+        const nz = Math.sqrt(Math.max(0, 1 - (radius / (HALF - 1)) ** 2));
+        const value = Math.min(1, Math.max(0, shade(px / (HALF - 1), py / (HALF - 1), nz, time)));
+        if (value <= BAYER4[(gy % 4) * 4 + (gx % 4)]) continue;
+        faceCtx.globalAlpha = fade;
+        faceCtx.fillStyle = `rgba(247,248,250,${(0.15 + 0.24 * value).toFixed(3)})`;
+        faceCtx.beginPath();
+        faceCtx.arc(px + HALF, py + HALF, CELL * 0.40, 0, Math.PI * 2);
+        faceCtx.fill();
+        faceCtx.globalAlpha = 1;
+      }
+    }
+    // Eye panels: one clean rounded rectangle per eye (LED panel), then a 2×2 pupil.
+    for (const eye of eyes) {
+      const height = Math.max(1, Math.round(eye.h));
+      const top = Math.round(eye.lift) - Math.floor(height / 2);
+      const x = (mid + eye.cx - 2) * CELL, y = (mid + top) * CELL;
+      const w = 5 * CELL, h = height * CELL;
+      faceCtx.globalAlpha = fade;
+      if (anim.arc > 0.5) {
+        // happy: the panel becomes an upward arc made of two thicker ends
+        faceCtx.fillStyle = 'rgba(250,251,253,0.99)';
+        faceCtx.beginPath();
+        faceCtx.roundRect(x, y, w, CELL * 0.9, 1.6);
+        faceCtx.fill();
+        faceCtx.beginPath();
+        faceCtx.roundRect(x, y, CELL * 0.9, h * 0.55, 1.6);
+        faceCtx.fill();
+        faceCtx.beginPath();
+        faceCtx.roundRect(x + w - CELL * 0.9, y, CELL * 0.9, h * 0.55, 1.6);
+        faceCtx.fill();
+      } else {
+        faceCtx.fillStyle = 'rgba(250,251,253,0.99)';
+        faceCtx.beginPath();
+        faceCtx.roundRect(x, y, w, h, 2.2);
+        faceCtx.fill();
+        // pupil: 2×2 cells, snapped to the grid so it still reads as pixels
+        const px = Math.round(gaze.x) * CELL, py = Math.round(gaze.y) * CELL;
+        const cx = x + w / 2 - CELL + px, cy = y + h / 2 - CELL + py;
+        faceCtx.fillStyle = 'rgba(20,24,31,0.96)';
+        faceCtx.beginPath();
+        faceCtx.roundRect(cx, cy, CELL * 2, CELL * 2, 1.4);
+        faceCtx.fill();
+      }
+      faceCtx.globalAlpha = 1;
+    }
+    requestAnimationFrame(drawFace);
+  }
+
+  /* ---------------- paper texture (mono, same 4px grid) ---------------- */
+  const paper = { buf: document.createElement('canvas'), cell: 4 };
+  function resizePaper() {
+    const width = Math.floor(win.clientWidth * ratio), height = Math.floor(win.clientHeight * ratio);
+    paperCanvas.width = width; paperCanvas.height = height;
+    paper.cell = Math.max(3, Math.round(4 * ratio));
+    paper.cols = Math.ceil(width / paper.cell); paper.rows = Math.ceil(height / paper.cell);
+    paper.ctx = paperCanvas.getContext('2d', { alpha: true });
+    paper.buf.width = paper.cols; paper.buf.height = paper.rows;
+    paper.bufCtx = paper.buf.getContext('2d');
+    paper.img = paper.bufCtx.createImageData(paper.cols, paper.rows);
+  }
+  function drawPaper(now) {
+    const time = (now - started) / 1000;
+    const w = paperCanvas.width, h = paperCanvas.height;
+    const cx = w / 2, cy = h / 2, radius = (SIZE / 2 + 6) * ratio;
+    const data = paper.img.data;
+    let index = 0;
+    for (let y = 0; y < paper.rows; y++) {
+      for (let x = 0; x < paper.cols; x++) {
+        const px = x * paper.cell, py = y * paper.cell;
+        const inside = Math.hypot(px - cx, py - cy) < radius;
+        const nx = px / w, ny = py / h;
+        const edge = Math.min(1, Math.max(0, Math.hypot(nx - 0.5, ny - 0.5) * 2.6 - 0.45));
+        const base = 0.5 + 0.5 * Math.sin(Math.hypot(nx - 0.5, ny - 0.5) * 14 - time * 0.5);
+        const value = Math.min(1, Math.max(0, (base * 0.7 + 0.2) * edge));
+        const on = !inside && value > BAYER8[(y % 8) * 8 + (x % 8)];
+        data[index++] = 24; data[index++] = 29; data[index++] = 38;
+        data[index++] = on ? 92 : 0;
+      }
+    }
+    paper.bufCtx.putImageData(paper.img, 0, 0);
+    paper.ctx.clearRect(0, 0, w, h);
+    paper.ctx.imageSmoothingEnabled = false;
+    paper.ctx.drawImage(paper.buf, 0, 0, paper.cols, paper.rows, 0, 0, paper.cols * paper.cell, paper.rows * paper.cell);
+    requestAnimationFrame(drawPaper);
+  }
+
+  const label = { listening: '收听中', thinking: '思考中', processing: '执行中', done: '已完成' };
+  function setState(next) {
+    state = next;
+    started = performance.now();
+    dissolve = 0;
+    win.className = `window ${next}`;
+    faceCanvas.setAttribute('aria-label', `机器人表情：${label[next]}`);
+    win.classList.remove('leaving');
+    if (next === 'done') setTimeout(() => win.classList.add('leaving'), 2400);
+  }
+  const order = ['listening', 'thinking', 'processing', 'done'];
+
+  // Gaze follows the pointer: the single biggest "it is alive" cue.
+  win.addEventListener('pointermove', event => {
+    const box = win.getBoundingClientRect();
+    gaze.tx = ((event.clientX - box.left) / box.width - 0.5) * 1.8;
+    gaze.ty = ((event.clientY - box.top) / box.height - 0.55) * 1.4;
+    gaze.nextAt = performance.now() + 1600;
+  });
+  document.getElementById('face').addEventListener('click', () => setState(order[(order.indexOf(state) + 1) % order.length]));
+  addEventListener('keydown', event => {
+    const map = { '1': 'listening', '2': 'thinking', '3': 'processing', '4': 'done' };
+    if (map[event.key]) setState(map[event.key]);
+    if (event.key === 'Escape') setState('done');
+    if (event.key.toLowerCase() === 'r') setState('listening');
+  });
+  document.getElementById('cancel').addEventListener('click', () => setState('done'));
+  document.getElementById('primary').addEventListener('click', () => setState(state === 'listening' ? 'thinking' : 'listening'));
+  addEventListener('resize', resizePaper);
+
+  faceCanvas.width = SIZE * ratio; faceCanvas.height = SIZE * ratio;
+  faceCanvas.style.width = `${SIZE}px`; faceCanvas.style.height = `${SIZE}px`;
+  resizePaper();
+  setState('listening');
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { drawFace(performance.now()); drawPaper(performance.now()); }
+  else { requestAnimationFrame(drawFace); requestAnimationFrame(drawPaper); }
+</script>
+</body>
+</html>

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>点阵球 · 四个状态的语义</title>
+<style>
+  :root {
+    --ease: cubic-bezier(.22,.61,.36,1);
+    font-family: "SF Pro Text", -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { background: #0d0e12; color: #e8eaef; padding: 22px 24px 34px; display: grid; gap: 18px; }
+
+  .bar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .bar h1 { margin: 0; font-size: 15px; font-weight: 620; letter-spacing: -.01em; }
+  .bar p { margin: 0; font-size: 12px; color: #868c99; }
+  .bar .spacer { flex: 1; }
+  .toggle { display: flex; gap: 6px; }
+  .toggle button, .states button {
+    font: inherit; font-size: 12px; color: #b6bcc8; background: #17191f; border: 1px solid #2a2d34;
+    border-radius: 999px; padding: 5px 12px; cursor: pointer; transition: all 160ms var(--ease);
+  }
+  .toggle button:hover, .states button:hover { color: #fff; border-color: #454a55; }
+  .toggle button[aria-pressed="true"], .states button[aria-pressed="true"] { background: #e8eaef; color: #0d0e12; border-color: #e8eaef; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+  .hero {
+    border-radius: 26px; padding: 18px; display: grid; justify-items: center; gap: 6px;
+    background: radial-gradient(120% 90% at 50% 0%, #26282e, #17181d 62%, #101116);
+    border: 1px solid rgb(255 255 255 / .1);
+    box-shadow: 0 30px 60px -30px rgb(0 0 0 / .9), 0 1px 0 rgb(255 255 255 / .08) inset;
+  }
+  .hero .stage { position: relative; width: 320px; height: 320px; display: grid; place-items: center; }
+  .hero canvas { width: 320px; height: 320px; display: block; }
+  .hero .check { position: absolute; width: 84px; height: 84px; opacity: 0; transform: scale(.7); transition: opacity 200ms var(--ease), transform 260ms var(--ease); }
+  .hero .check path { fill: none; stroke: #0d0e12; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 40; }
+  .hero.is-done .check { opacity: 1; transform: scale(1); }
+  .hero.is-done .check path { animation: draw 420ms var(--ease) 180ms forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  .hero h2 { margin: 6px 0 0; font-size: 19px; font-weight: 620; letter-spacing: -.015em; }
+  .hero .sub { margin: 0; font-size: 12px; color: #9aa1ad; text-align: center; max-width: 30ch; line-height: 1.5; }
+
+  .states { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 620px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .tile {
+    border-radius: 20px; padding: 12px; display: grid; gap: 4px; cursor: pointer;
+    background: linear-gradient(180deg, rgb(255 255 255 / .06), rgb(255 255 255 / .02));
+    border: 1px solid rgb(255 255 255 / .1); transition: all 200ms var(--ease);
+  }
+  .tile:hover { border-color: rgb(255 255 255 / .22); transform: translateY(-1px); }
+  .tile[aria-pressed="true"] { border-color: rgb(255 255 255 / .42); background: linear-gradient(180deg, rgb(255 255 255 / .1), rgb(255 255 255 / .04)); }
+  .tile .head { display: flex; align-items: center; gap: 8px; }
+  .tile .name { font-size: 12px; font-weight: 620; letter-spacing: .02em; }
+  .tile .grammar { margin-left: auto; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #868c99; }
+  .tile .stage { position: relative; display: grid; place-items: center; height: 132px; }
+  .tile canvas { width: 132px; height: 132px; display: block; }
+  .tile .meta { font-size: 11px; color: #9aa1ad; line-height: 1.5; }
+  .tile .meta b { color: #d7dbe3; font-weight: 560; }
+  @media (prefers-reduced-motion: reduce) { .hero.is-done .check path { animation: none; stroke-dashoffset: 0; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>点阵球 · 四个状态的语义</h1>
+  <p>右边四个小球是“钉住”的状态，可同时对比；点一个让它变成左边的主角</p>
+  <span class="spacer"></span>
+  <div class="toggle" role="group" aria-label="配色">
+    <button type="button" data-palette="graphite" aria-pressed="true">石墨黑</button>
+    <button type="button" data-palette="blue" aria-pressed="false">蓝</button>
+    <button type="button" data-palette="paper" aria-pressed="false">暖纸</button>
+  </div>
+</div>
+
+<div class="layout">
+  <section class="hero" id="hero">
+    <div class="stage">
+      <canvas id="hero-canvas" aria-hidden="true"></canvas>
+      <svg class="check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.6 4.6L19 7.6"></path></svg>
+    </div>
+    <h2 id="hero-title">我在听</h2>
+    <p class="sub" id="hero-sub">你在说话时，点阵向球心收拢——像“被听见”，而不是水波纹向外扩散。</p>
+    <div class="states" role="group" aria-label="当前状态">
+      <button type="button" data-state="listening" aria-pressed="true">收听</button>
+      <button type="button" data-state="thinking" aria-pressed="false">思考</button>
+      <button type="button" data-state="processing" aria-pressed="false">处理</button>
+      <button type="button" data-state="done" aria-pressed="false">完成</button>
+    </div>
+  </section>
+
+  <section class="grid" id="grid"></section>
+</div>
+
+<script>
+  const STATES = [
+    {
+      key: 'listening', name: '收听', grammar: 'converge · 收拢',
+      title: '我在听',
+      meta: '<b>向内收</b>：点阵随你的音量向球心聚拢，声大则收得紧。四态里唯一“振幅跟声音走”的状态。',
+    },
+    {
+      key: 'thinking', name: '思考', grammar: 'scan · 扫描',
+      title: '在想',
+      meta: '<b>扫描 + 零散点亮</b>：一条亮带上下扫过球面，零星几个点像神经放电般闪一下——在找，不是在做。',
+    },
+    {
+      key: 'processing', name: '处理', grammar: 'flow · 推进',
+      title: '正在打开',
+      meta: '<b>单向流动</b>：一条清晰的边界从左推到右，越过的点被“锁定”变亮——有进度的确定动作。',
+    },
+    {
+      key: 'done', name: '完成', grammar: 'burst · 释放',
+      title: '好了',
+      meta: '<b>向外释放</b>：一圈亮点从球心扩出去、随后整体收束消失——事情结束了，气泡也该走了。',
+    },
+  ];
+
+  const PALETTES = {
+    graphite: { dotLit: '#f2f5fa', dotDim: '#79818f', accent: '#c9d0da', check: '#0d0e12' },
+    blue: { dotLit: '#7fb4ff', dotDim: '#1c3f7a', accent: '#2f6fd0', check: '#f4f9ff' },
+    paper: { dotLit: '#d98a5e', dotDim: '#6f2a14', accent: '#c2542c', check: '#fff6ec' },
+  };
+
+  const BAYER = [
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+  ].map(value => (value + 0.5) / 64);
+
+  const hexToRgb = value => {
+    const hex = value.replace('#', '');
+    const n = parseInt(hex, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const mix = (a, b, t) => {
+    const [r1, g1, b1] = hexToRgb(a), [r2, g2, b2] = hexToRgb(b);
+    return `rgb(${Math.round(r1 + (r2 - r1) * t)} ${Math.round(g1 + (g2 - g1) * t)} ${Math.round(b1 + (b2 - b1) * t)})`;
+  };
+  // Deterministic per-dot hash: lets single dots sparkle without looking like noise.
+  const hash = (x, y) => {
+    const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  };
+
+  let paletteKey = 'graphite';
+  let heroState = 'listening';
+  let heroStart = performance.now();
+  let level = 0.45;
+
+  /* ---------- one painter, four motion grammars ---------- */
+  function paintOrb(canvas, state, time, alphaScale = 1) {
+    const ctx = canvas.getContext('2d');
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const size = canvas.clientWidth || 132;
+    if (canvas.width !== Math.round(size * ratio)) {
+      canvas.width = Math.round(size * ratio);
+      canvas.height = Math.round(size * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+    const pal = PALETTES[paletteKey];
+    const R = size * 0.42, spacing = Math.max(4, size / 30), center = size / 2;
+    ctx.clearRect(0, 0, size, size);
+
+    const lx = -0.4, ly = -0.5, lz = 0.77;
+    // Per-state global phase. `done` restarts after it finishes.
+    const cycle = state === 'done' ? 2.4 : 0;
+    const local = cycle ? (time % cycle) / cycle : 0;
+    const doneP = Math.min(1, local / 0.55);
+    const scanY = Math.sin(time * 1.1) * R * 0.85;
+    const flowX = -R + ((time * 0.55) % 1.6) / 1.6 * (R * 2.2);
+    const shellR = R * (0.15 + doneP * 1.5);
+
+    for (let gy = -R; gy <= R; gy += spacing) {
+      for (let gx = -R; gx <= R; gx += spacing) {
+        const gridDist = Math.hypot(gx, gy);
+        if (gridDist > R) continue;
+
+        let x = gx, y = gy, radiusScale = 1, glow = 0, extraAlpha = 0;
+
+        if (state === 'listening') {
+          // Converge inward with the voice; the centre lights up first.
+          const pull = (0.06 + 0.20 * level) * (0.65 + 0.35 * Math.sin(time * 3.4));
+          x = gx * (1 - pull); y = gy * (1 - pull);
+          glow = Math.exp(-Math.pow(gridDist / R, 2) * 2.4) * (0.35 + 0.65 * level);
+          radiusScale = 0.86 + 0.30 * level;
+        } else if (state === 'thinking') {
+          // A band sweeps the sphere; a few dots spark like neurons firing.
+          const band = Math.exp(-Math.pow((gy - scanY) / (R * 0.24), 2));
+          const sparkle = hash(gx, gy) > 0.88 ? Math.max(0, Math.sin(time * 5 + hash(gy, gx) * 12)) : 0;
+          x = gx + band * Math.sin(time * 9 + hash(gx, gy) * 8) * 0.9;
+          glow = band * 1.05 + sparkle * 0.65;
+          radiusScale = 0.62 + band * 0.75 + sparkle * 0.35;
+          extraAlpha = sparkle * 0.6;
+        } else if (state === 'processing') {
+          // A hard boundary advances; dots behind it lock bright, dots ahead stay dim.
+          const passed = gx < flowX;
+          const edge = Math.abs(gx - flowX) < spacing * 1.2;
+          const dither = BAYER[((Math.round(gy / spacing) % 8) + 8) % 8 * 8 + ((Math.round(gx / spacing) % 8) + 8) % 8];
+          if (edge && dither < 0.5) { radiusScale = 0.5; glow = 0.2; }
+          else if (passed) { glow = 0.92 + 0.1 * Math.sin((gy / spacing) * 0.5 + time * 6); radiusScale = 1.08; }
+          else { glow = 0.015; radiusScale = 0.58; }
+        } else {
+          // Done: one shell of light expands outward, then the whole field gathers into
+          // a small steady ring — "released, settled, about to leave".
+          const hold = local > 0.55;
+          const blast = Math.min(1, local / 0.55);
+          const ringR = hold ? R * 0.2 : R * (0.12 + blast * 1.32);
+          const collapse = hold ? 1 - Math.min(1, (local - 0.55) / 0.3) * 0.74 : 1;
+          x = gx * collapse; y = gy * collapse;
+          const shell = Math.exp(-Math.pow((gridDist - ringR) / (R * (hold ? 0.14 : 0.11)), 2));
+          glow = shell * (hold ? 0.85 : 1);
+          radiusScale = hold ? 1.05 : 0.6 + shell * 1.25;
+          extraAlpha = shell * (hold ? 0.35 : 0.6);
+        }
+
+        const dist = Math.hypot(x, y);
+        const z = Math.sqrt(Math.max(0, R * R - dist * dist)) / R;
+        const nx = dist > 0 ? x / R : 0, ny = dist > 0 ? y / R : 0;
+        const lambert = Math.max(0, nx * lx + ny * ly + z * lz);
+        const light = Math.pow(lambert, 1.5);
+        const sphere = 0.3 + 0.7 * z;
+        const edgeFade = Math.min(1, (R - dist) / (spacing * 0.4));
+
+        const dotRadius = spacing * 0.40 * sphere * radiusScale * (0.42 + 0.8 * light) * edgeFade;
+        if (dotRadius <= 0.18) continue;
+
+        const shade = Math.min(1, Math.max(0, 1 - light * 0.95));
+        ctx.globalAlpha = Math.min(1, (0.16 + 0.84 * Math.max(0, Math.min(1, 0.3 * light + glow))) * alphaScale);
+        ctx.fillStyle = mix(pal.dotLit, pal.dotDim, shade * 0.85 - glow * 0.45);
+        ctx.beginPath();
+        ctx.arc(center + x, center + y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (glow > 0.78 || extraAlpha > 0.4) {
+          ctx.globalAlpha = Math.min(1, glow * 0.7 + extraAlpha);
+          ctx.fillStyle = pal.dotLit;
+          ctx.beginPath();
+          ctx.arc(center + x, center + y, dotRadius * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- build the four pinned tiles ---------- */
+  const grid = document.getElementById('grid');
+  const tiles = [];
+  for (const def of STATES) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.dataset.state = def.key;
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('tabindex', '0');
+    tile.setAttribute('aria-pressed', 'false');
+    tile.innerHTML = `
+      <div class="head"><span class="name">${def.name}</span><span class="grammar">${def.grammar}</span></div>
+      <div class="stage"><canvas aria-hidden="true"></canvas></div>
+      <p class="meta">${def.meta}</p>`;
+    tile.addEventListener('click', () => selectState(def.key));
+    tile.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectState(def.key); }
+    });
+    grid.appendChild(tile);
+    tiles.push({ def, tile, canvas: tile.querySelector('canvas'), start: performance.now() - Math.random() * 900 });
+  }
+
+  const hero = document.getElementById('hero');
+  const heroCanvas = document.getElementById('hero-canvas');
+  const heroTitle = document.getElementById('hero-title');
+  const heroSub = document.getElementById('hero-sub');
+
+  function selectState(key) {
+    heroState = key;
+    heroStart = performance.now();
+    const def = STATES.find(entry => entry.key === key);
+    heroTitle.textContent = def.title;
+    heroSub.textContent = def.meta.replace(/<[^>]+>/g, '');
+    hero.classList.toggle('is-done', key === 'done');
+    for (const button of document.querySelectorAll('.states button')) button.setAttribute('aria-pressed', String(button.dataset.state === key));
+    for (const entry of tiles) entry.tile.setAttribute('aria-pressed', String(entry.def.key === key));
+  }
+
+  for (const button of document.querySelectorAll('.states button')) {
+    button.addEventListener('click', () => selectState(button.dataset.state));
+  }
+  for (const button of document.querySelectorAll('.toggle button')) {
+    button.addEventListener('click', () => {
+      paletteKey = button.dataset.palette;
+      for (const other of document.querySelectorAll('.toggle button')) other.setAttribute('aria-pressed', String(other === button));
+    });
+  }
+  addEventListener('keydown', event => {
+    const map = { '1': 'listening', '2': 'thinking', '3': 'processing', '4': 'done' };
+    if (map[event.key]) selectState(map[event.key]);
+  });
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame(now) {
+    level = 0.34 + 0.30 * (0.5 + 0.5 * Math.sin(now / 520)) + 0.16 * (0.5 + 0.5 * Math.sin(now / 210 + 1.2));
+    paintOrb(heroCanvas, heroState, (now - heroStart) / 1000);
+    for (const entry of tiles) paintOrb(entry.canvas, entry.def.key, (now - entry.start) / 1000);
+    requestAnimationFrame(frame);
+  }
+
+  selectState('listening');
+  if (!reduced) requestAnimationFrame(frame);
+  else {
+    paintOrb(heroCanvas, 'listening', 0.4);
+    for (const entry of tiles) paintOrb(entry.canvas, entry.def.key, 0.4);
+  }
+</script>
+</body>
+</html>

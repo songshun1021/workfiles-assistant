@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurora Glass · 语音面板概念 A</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #f5f7fb;
+    --muted: #9aa3b2;
+    --accent: #5ac8ff;
+    --accent-2: #a78bfa;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center;
+    background: #05070d;
+    overflow: hidden;
+  }
+  /* Ambient aurora: three slow blobs behind the glass. */
+  .aurora { position: fixed; inset: -20%; filter: blur(80px) saturate(140%); opacity: .85; }
+  .aurora i {
+    position: absolute; display: block; border-radius: 50%;
+    mix-blend-mode: screen; animation: drift 22s var(--ease) infinite alternate;
+  }
+  .aurora i:nth-child(1) { width: 52vmax; height: 52vmax; left: 4%; top: 6%; background: radial-gradient(circle, #1b6bff 0%, transparent 62%); }
+  .aurora i:nth-child(2) { width: 46vmax; height: 46vmax; right: 2%; top: 12%; background: radial-gradient(circle, #7a3cff 0%, transparent 64%); animation-delay: -6s; }
+  .aurora i:nth-child(3) { width: 40vmax; height: 40vmax; left: 28%; bottom: -6%; background: radial-gradient(circle, #12c2a8 0%, transparent 66%); animation-delay: -12s; }
+  @keyframes drift {
+    from { transform: translate3d(0,0,0) scale(1); }
+    to   { transform: translate3d(4vw, -3vh, 0) scale(1.12); }
+  }
+
+  /* The glass card: the only surface on screen. */
+  .panel {
+    position: relative; width: min(560px, 92vw); padding: 18px 20px 16px;
+    border-radius: 22px;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / .14), transparent 42%),
+      rgb(255 255 255 / .06);
+    border: 1px solid rgb(255 255 255 / .18);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / .35),
+      0 24px 80px rgb(0 0 0 / .55);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    color: var(--ink);
+  }
+  .row { display: flex; align-items: center; gap: 10px; min-height: 26px; }
+  .spacer { flex: 1; }
+  .badge { display: grid; place-items: center; width: 22px; height: 22px; color: var(--accent); }
+  .badge svg { width: 20px; height: 20px; }
+  .subtitle { font-size: 12.5px; color: var(--muted); letter-spacing: .01em; }
+  .icon-btn {
+    display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+    border: 0; border-radius: 50%; color: var(--muted); background: transparent; cursor: pointer;
+    transition: background 160ms var(--ease), color 160ms var(--ease), transform 120ms var(--ease);
+  }
+  .icon-btn:hover { background: rgb(255 255 255 / .1); color: var(--ink); }
+  .icon-btn:active { transform: scale(.92); }
+  .icon-btn[data-kind="primary"] { color: var(--accent); }
+  .icon-btn svg { width: 17px; height: 17px; }
+
+  .title {
+    margin: 10px 0 2px; font-size: 21px; font-weight: 620; letter-spacing: -.015em; line-height: 1.28;
+    min-height: 27px;
+  }
+  .body { margin: 0; font-size: 13px; color: var(--muted); min-height: 18px; }
+
+  /* Listening: waveform + expanding rings around the badge. */
+  .stage { position: relative; margin-top: 14px; height: 74px; display: grid; place-items: center; }
+  .wave { display: flex; align-items: center; gap: 5px; height: 64px; }
+  .wave span {
+    width: 5px; border-radius: 3px; background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    height: 18%; transition: height 110ms linear; box-shadow: 0 0 18px rgb(90 200 255 / .55);
+  }
+  .ring { position: absolute; width: 64px; height: 64px; border-radius: 50%; border: 1px solid rgb(90 200 255 / .5); opacity: 0; }
+  .state-listening .ring { animation: ring 2.4s var(--ease) infinite; }
+  .state-listening .ring:nth-child(2) { animation-delay: 1.2s; }
+  @keyframes ring { from { transform: scale(.4); opacity: .8; } to { transform: scale(1.9); opacity: 0; } }
+
+  /* Thinking: three orbiting particles. */
+  .orbit { position: absolute; width: 74px; height: 74px; opacity: 0; transition: opacity 240ms var(--ease); }
+  .orbit i { position: absolute; inset: 0; animation: spin 3.2s linear infinite; }
+  .orbit i::before {
+    content: ""; position: absolute; top: -3px; left: calc(50% - 3px); width: 6px; height: 6px;
+    border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px var(--accent);
+  }
+  .orbit i:nth-child(2) { animation-duration: 2.3s; animation-direction: reverse; }
+  .orbit i:nth-child(2)::before { background: var(--accent-2); box-shadow: 0 0 14px var(--accent-2); }
+  .orbit i:nth-child(3) { animation-duration: 4.1s; }
+  .state-thinking .orbit { opacity: 1; }
+  .state-thinking .wave { opacity: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Processing: a progress sweep. */
+  .bar { position: absolute; width: 70%; height: 2px; border-radius: 2px; background: rgb(255 255 255 / .12); overflow: hidden; opacity: 0; transition: opacity 200ms var(--ease); }
+  .bar::after { content: ""; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: sweep 1.5s var(--ease) infinite; }
+  .state-processing .bar { opacity: 1; }
+  .state-processing .wave, .state-processing .orbit { opacity: 0; }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+
+  /* Done: a checked mark that draws itself, then the panel settles. */
+  .check { position: absolute; width: 46px; height: 46px; opacity: 0; transform: scale(.6); transition: opacity 220ms var(--ease), transform 260ms var(--ease); }
+  .check path { fill: none; stroke: var(--accent); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 34; stroke-dashoffset: 34; }
+  .state-done .check { opacity: 1; transform: scale(1); }
+  .state-done .check path { animation: draw 420ms var(--ease) forwards; }
+  .state-done .wave, .state-done .orbit, .state-done .bar, .state-done .ring { opacity: 0; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .panel.done { animation: settle 520ms var(--ease); }
+  @keyframes settle { 0% { transform: scale(1); } 40% { transform: scale(.985); } 100% { transform: scale(1); } }
+
+  .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .hint { font-size: 11.5px; color: var(--muted); }
+  .states { display: flex; gap: 6px; }
+  .states button {
+    border: 1px solid rgb(255 255 255 / .16); background: transparent; color: var(--muted);
+    font: inherit; font-size: 11.5px; padding: 4px 9px; border-radius: 999px; cursor: pointer;
+    transition: all 160ms var(--ease);
+  }
+  .states button[aria-pressed="true"] { color: #05070d; background: var(--accent); border-color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    .aurora i, .ring, .orbit i, .bar::after, .panel.done { animation: none !important; }
+    .wave span { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<main class="panel state-listening" id="panel" aria-label="语音助手面板概念 A：极光玻璃">
+  <div class="row">
+    <span class="badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="3" width="6" height="12" rx="3"></rect>
+        <path d="M5.5 10.5v1a6.5 6.5 0 0 0 13 0v-1M12 18v3M9 21h6"></path>
+      </svg>
+    </span>
+    <span class="spacer"></span>
+    <button class="icon-btn" data-kind="primary" id="primary" title="开始 / 停止" aria-label="开始或停止说话">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v16M4 12h16"></path></svg>
+    </button>
+    <button class="icon-btn" id="cancel" title="取消（Esc）" aria-label="取消">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg>
+    </button>
+  </div>
+
+  <h1 class="title" id="title">正在听你说…</h1>
+  <p class="body" id="body">说“打开我最近看过的三条推文”，说完停顿即可</p>
+
+  <div class="stage" aria-hidden="true">
+    <div class="wave" id="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="ring"></div><div class="ring"></div>
+    <div class="orbit"><i></i><i></i><i></i></div>
+    <div class="bar"></div>
+    <svg class="check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+  </div>
+
+  <div class="foot">
+    <span class="hint">概念 A · 极光玻璃（示意动画，非真实麦克风）</span>
+    <div class="states" role="group" aria-label="状态演示">
+      <button type="button" data-state="listening" aria-pressed="true">收听</button>
+      <button type="button" data-state="thinking" aria-pressed="false">思考</button>
+      <button type="button" data-state="processing" aria-pressed="false">处理</button>
+      <button type="button" data-state="done" aria-pressed="false">完成</button>
+    </div>
+  </div>
+</main>
+
+<script>
+  const panel = document.getElementById('panel');
+  const title = document.getElementById('title');
+  const body = document.getElementById('body');
+  const bars = [...document.querySelectorAll('#wave span')];
+  const buttons = [...document.querySelectorAll('.states button')];
+
+  const copy = {
+    listening: ['正在听你说…', '说“打开我最近看过的三条推文”，说完停顿即可'],
+    thinking: ['在想你要的是哪一份…', '正在从最近 7 天的线索里比对'],
+    processing: ['正在打开…', '已定位到 3 条候选，正在请求系统打开'],
+    done: ['已打开', '系统接受请求 · 不代表已确认窗口出现'],
+  };
+
+  let state = 'listening';
+  let level = 0.35;
+  let raf = 0;
+  let phase = 0;
+
+  function setState(next) {
+    state = next;
+    panel.className = `panel state-${next}`;
+    for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.state === next));
+    title.textContent = copy[next][0];
+    body.textContent = copy[next][1];
+    if (next === 'done') {
+      panel.classList.add('done');
+      setTimeout(() => panel.classList.remove('done'), 560);
+    }
+  }
+
+  // Synthetic but deterministic envelope: the real product would feed RMS here.
+  function animate() {
+    phase += 0.06;
+    level = 0.26 + 0.2 * (0.5 + 0.5 * Math.sin(phase * 0.9)) + 0.12 * (0.5 + 0.5 * Math.sin(phase * 2.3 + 1.1));
+    bars.forEach((bar, index) => {
+      const w = 0.5 + 0.5 * Math.sin(phase * (1.6 + index * 0.22) + index * 0.7);
+      const height = Math.max(8, Math.round(level * 62 * (0.45 + 0.55 * w)));
+      bar.style.height = `${height}px`;
+    });
+    raf = requestAnimationFrame(animate);
+  }
+
+  for (const button of buttons) button.addEventListener('click', () => setState(button.dataset.state));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') setState('done');
+    const map = { '1': 'listening', '2': 'thinking', '3': 'processing', '4': 'done' };
+    if (map[event.key]) setState(map[event.key]);
+  });
+  document.getElementById('primary').addEventListener('click', () => setState(state === 'listening' ? 'thinking' : 'listening'));
+  document.getElementById('cancel').addEventListener('click', () => setState('done'));
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    bars.forEach((bar, index) => { bar.style.height = `${18 + index * 4}px`; });
+  } else {
+    animate();
+  }
+  setState('listening');
+</script>
+</body>
+</html>

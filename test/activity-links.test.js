@@ -32,7 +32,7 @@ function fixture(initial = row()) {
   const states = new Map();
   const state = session => states.get(session) ?? { context: emptyContext(), tools: {}, commands: {} };
   const ops = createOperations({ getActivity: () => controller, getContext: session => state(session).context,
-    getSettings: () => ({ enabled, roots: [] }), openObserved: open,
+    getSettings: () => ({ enabled, roots: [] }), getTurn: session => state(session).turn ?? 0, openObserved: open,
     engine: { async observedCandidate() { calls.fileChecks++; throw new Error('Window hints must not be statted as files'); } } });
   const A = { session: { id: 'voice-a' } }, B = { session: { id: 'other-b' } };
   async function call(agent, action, args = {}) {
@@ -159,4 +159,23 @@ test('revealing a web clue is refused: it has no local folder to show', async ()
   const revealed = await h.call(h.A, 'open', { candidateId: id, revealInFinder: true });
   assert.equal(revealed.ok, false); assert.equal(revealed.code, 'REVEAL_UNAVAILABLE');
   assert.equal(h.calls.native.length, 0, 'no Finder or browser request is made');
+});
+
+test('a new human request invalidates earlier web candidates until history is queried again', async () => {
+  const h = fixture();
+  const first = await h.call(h.A, 'history', { detail: 'documents' });
+  const id = first.data.webCandidates[0].id;
+  assert.equal((await h.call(h.A, 'open', { candidateId: id })).data.status, 'open_requested');
+  const opened = h.calls.native.length;
+  // A new user message starts a new turn: the previous query is now stale.
+  h.state(h.A.session);
+  const before = h.state(h.A.session);
+  h.state(h.A.session).turn = (before.turn ?? 0) + 1;
+  const stale = await h.call(h.A, 'open', { candidateId: id });
+  assert.equal(stale.ok, false); assert.equal(stale.code, 'STALE_CONTEXT');
+  assert.equal(h.calls.native.length, opened, 'a stale id never reaches the OS');
+  // Querying again in the new turn restores the capability.
+  const second = await h.call(h.A, 'history', { detail: 'documents' });
+  assert.equal(second.data.webCandidates[0].id, id);
+  assert.equal((await h.call(h.A, 'open', { candidateId: id })).data.status, 'open_requested');
 });

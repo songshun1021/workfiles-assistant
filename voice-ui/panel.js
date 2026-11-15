@@ -1,12 +1,197 @@
 import { createPcmCapture, isCaptureIntent, selectLocalVoice, wavToBase64 } from './audio.js';
-import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity } from './view-state.js';
+import { SHORT_FEEDBACK_DISMISS_MS, selectPanelStatus, selectPanelEcho, updateFeedbackRetention, shouldAutoDismissFeedback, panelActivity, panelDensity, shouldAutoPrepare } from './view-state.js';
 
 // This is the real, isolated native feature renderer. It has no file/network/generic IPC API.
 const bridge = window.workfilesVoice;
 const hasBridge = Boolean(bridge && ['onState', 'ready', 'audio', 'text', 'action', 'capture'].every(name => typeof bridge[name] === 'function'));
-const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit'].map(id => [id, document.getElementById(id)]));
+const ui = Object.fromEntries(['status', 'primary', 'cancel', 'echo', 'error', 'detail', 'progress', 'hint', 'level', 'typing-toggle', 'text-form', 'text-input', 'text-submit', 'orb', 'timer', 'content'].map(id => [id, document.getElementById(id)]));
 const panel = document.querySelector('.voice-panel');
 const PHASES = new Set(['ready', 'preparing', 'listening', 'transcribing', 'working', 'question', 'done', 'error']);
+
+/* ---------------------------------------------------------------------------
+ * Dot-matrix orb: one painter, six motion grammars. It is the only level meter
+ * and the only activity indicator in the panel, so nothing else may animate.
+ *   rest     — dim, still: nothing is owed to you yet
+ *   converge — pulled inward by the real microphone RMS (the only voice-coupled state)
+ *   flow     — a hard boundary sweeps once: deterministic progress
+ *   scan     — a band sweeps with sparse sparks: searching, no percentage
+ *   hold     — bright and still: it is your turn
+ *   burst    — one outward shell, then settle: the task really ended
+ * Sizes and colours come from CSS custom properties so light/dark still follow the host.
+ * ------------------------------------------------------------------------- */
+const orbCtx = ui.orb && typeof ui.orb.getContext === 'function' ? ui.orb.getContext('2d') : null;
+const BAYER = [
+  0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+  12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+  3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+  15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21,
+].map(value => (value + 0.5) / 64);
+const orbPalette = { lit: [38, 98, 192], dim: [189, 209, 235] };
+let orbStateNow = '';
+let orbStateStart = 0;
+let orbFrame;
+let voiceLevel = 0;
+let orbRunning = false;
+const reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+// Deterministic per-dot hash: single dots can sparkle without looking like noise.
+const orbHash = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
+const orbMix = (a, b, t) => {
+  const k = Math.max(0, Math.min(1, t));
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * k)} ${Math.round(a[1] + (b[1] - a[1]) * k)} ${Math.round(a[2] + (b[2] - a[2]) * k)})`;
+};
+
+function hslToRgb(h, s, l) {
+  const sat = s / 100, light = l / 100;
+  const k = n => (n + h / 30) % 12;
+  const a = sat * Math.min(light, 1 - light);
+  const channel = n => Math.round(255 * (light - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+  return [channel(0), channel(8), channel(4)];
+}
+
+function readOrbPalette() {
+  // The canvas needs numbers; CSS owns the channels so light/dark still follow the host.
+  try {
+    const style = window.getComputedStyle(document.documentElement);
+    const value = name => parseFloat(String(style.getPropertyValue(name) || '').replace('%', ''));
+    const hsl = prefix => {
+      const parts = [value(`--${prefix}-h`), value(`--${prefix}-s`), value(`--${prefix}-l`)];
+      return parts.every(Number.isFinite) ? parts : null;
+    };
+    const lit = hsl('voice-pin');
+    const dim = hsl('voice-pin-dim');
+    if (lit) orbPalette.lit = hslToRgb(lit[0], lit[1], lit[2]);
+    if (dim) orbPalette.dim = hslToRgb(dim[0], dim[1], dim[2]);
+  } catch { /* keep the last known palette */ }
+}
+
+function orbState() {
+  // Read the same display phase the CSS sees, so the orb can never disagree with the
+  // panel (blocked/typing/pending states are the panel's own, not the Host's).
+  const phase = panel.dataset.phase || 'ready';
+  if (phase === 'error') return 'rest';
+  if (phase === 'listening') return 'converge';
+  if (phase === 'preparing' || phase === 'transcribing') return 'flow';
+  if (phase === 'working') return 'scan';
+  if (phase === 'question') return 'hold';
+  if (phase === 'done') return 'burst';
+  return 'rest';
+}
+
+function paintOrb(state, time, level) {
+  if (!orbCtx) return;
+  const size = ui.orb.clientWidth;
+  if (!size) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixels = Math.round(size * ratio);
+  if (ui.orb.width !== pixels || ui.orb.height !== pixels) { ui.orb.width = pixels; ui.orb.height = pixels; }
+  orbCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  orbCtx.clearRect(0, 0, size, size);
+
+  const R = size * 0.43;
+  const spacing = Math.max(3.6, size / 14.5);
+  const center = size / 2;
+  const lx = -0.42, ly = -0.52, lz = 0.74;
+  const cycle = state === 'burst' ? 2.4 : 0;
+  const local = cycle ? (time % cycle) / cycle : 0;
+  const scanY = Math.sin(time * 1.1) * R * 0.85;
+  const flowP = Math.min(1, (time % 1.75) / 1.55);
+  const flowX = -R * 1.06 + flowP * R * 2.12;
+  const dim = state === 'rest';
+
+  for (let gy = -R; gy <= R; gy += spacing) {
+    for (let gx = -R; gx <= R; gx += spacing) {
+      const gridDist = Math.hypot(gx, gy);
+      if (gridDist > R) continue;
+
+      let x = gx, y = gy, radiusScale = 1, glow = 0, extraAlpha = 0;
+
+      if (state === 'converge') {
+        const pull = (0.06 + 0.20 * level) * (0.65 + 0.35 * Math.sin(time * 3.4));
+        x = gx * (1 - pull); y = gy * (1 - pull);
+        glow = Math.exp(-Math.pow(gridDist / R, 2) * 2.4) * (0.35 + 0.65 * level);
+        radiusScale = 0.86 + 0.30 * level;
+      } else if (state === 'scan') {
+        const band = Math.exp(-Math.pow((gy - scanY) / (R * 0.24), 2));
+        const sparkle = orbHash(gx, gy) > 0.88 ? Math.max(0, Math.sin(time * 5 + orbHash(gy, gx) * 12)) : 0;
+        x = gx + band * Math.sin(time * 9 + orbHash(gx, gy) * 8) * 0.9;
+        glow = 0.1 + band * 1.0 + sparkle * 0.65;
+        radiusScale = 0.72 + band * 0.7 + sparkle * 0.3;
+        extraAlpha = sparkle * 0.6;
+      } else if (state === 'flow') {
+        const passed = gx < flowX;
+        const edge = Math.abs(gx - flowX) < spacing * 1.2;
+        const dither = BAYER[((Math.round(gy / spacing) % 8) + 8) % 8 * 8 + ((Math.round(gx / spacing) % 8) + 8) % 8];
+        if (edge && dither < 0.5) { radiusScale = 0.5; glow = 0.2; }
+        else if (passed) { glow = 0.92 + 0.1 * Math.sin((gy / spacing) * 0.5 + time * 6); radiusScale = 1.08; }
+        else { glow = 0.015; radiusScale = 0.58; }
+      } else if (state === 'hold') {
+        glow = 0.6 + 0.07 * Math.sin(time * 1.35);
+        radiusScale = 1.0 + 0.02 * Math.sin(time * 1.35);
+      } else if (state === 'burst') {
+        const settle = local > 0.55;
+        const blast = Math.min(1, local / 0.55);
+        const ringR = settle ? R * 0.26 : R * (0.12 + blast * 1.32);
+        const collapse = settle ? 1 - Math.min(1, (local - 0.55) / 0.3) * 0.52 : 1;
+        x = gx * collapse; y = gy * collapse;
+        const shell = Math.exp(-Math.pow((gridDist - ringR) / (R * (settle ? 0.14 : 0.11)), 2));
+        glow = 0.12 + shell * (settle ? 0.85 : 1);
+        radiusScale = settle ? 1.05 : 0.6 + shell * 1.25;
+        extraAlpha = shell * (settle ? 0.35 : 0.6);
+      } else {
+        glow = 0;
+        radiusScale = 0.8 + 0.05 * Math.sin(time * 0.9);
+      }
+
+      const dist = Math.hypot(x, y);
+      const z = Math.sqrt(Math.max(0, R * R - dist * dist)) / R;
+      const nx = dist > 0 ? x / R : 0, ny = dist > 0 ? y / R : 0;
+      const light = Math.pow(Math.max(0, nx * lx + ny * ly + z * lz), 1.5);
+      const sphere = 0.3 + 0.7 * z;
+      const edgeFade = Math.min(1, (R - dist) / (spacing * 0.4));
+      const dotRadius = spacing * 0.44 * sphere * radiusScale * (0.42 + 0.8 * light) * edgeFade;
+      if (dotRadius <= 0.18) continue;
+
+      const shade = Math.min(1, Math.max(0, 1 - light * 0.95));
+      const base = 0.16 + 0.84 * Math.max(0, Math.min(1, 0.3 * light + glow));
+      orbCtx.globalAlpha = Math.min(1, base * (dim ? 0.72 : 1));
+      orbCtx.fillStyle = orbMix(orbPalette.lit, orbPalette.dim, shade * 0.85 - glow * 0.45);
+      orbCtx.beginPath();
+      orbCtx.arc(center + x, center + y, dotRadius, 0, Math.PI * 2);
+      orbCtx.fill();
+
+      if (glow > 0.78 || extraAlpha > 0.4) {
+        orbCtx.globalAlpha = Math.min(1, (glow * 0.7 + extraAlpha) * (dim ? 0.72 : 1));
+        orbCtx.fillStyle = orbMix(orbPalette.lit, orbPalette.lit, 0);
+        orbCtx.beginPath();
+        orbCtx.arc(center + x, center + y, dotRadius * 0.5, 0, Math.PI * 2);
+        orbCtx.fill();
+      }
+    }
+  }
+  orbCtx.globalAlpha = 1;
+}
+
+function orbTick(now) {
+  if (disposed || !orbRunning) return;
+  orbFrame = window.requestAnimationFrame(orbTick);
+  if (document.visibilityState === 'hidden') return;
+  const state = orbState();
+  if (state !== orbStateNow) { orbStateNow = state; orbStateStart = now; }
+  paintOrb(state, (now - orbStateStart) / 1000, voiceLevel);
+}
+
+function syncOrb() {
+  const animate = Boolean(orbCtx) && !reducedMotion?.matches;
+  if (animate && !orbRunning) { orbRunning = true; orbFrame = window.requestAnimationFrame(orbTick); }
+  else if (!animate && orbRunning) { orbRunning = false; window.cancelAnimationFrame(orbFrame); }
+  if (!animate && orbCtx) {
+    // Reduced motion still gets the state, just as one still frame.
+    const state = orbState();
+    if (state !== orbStateNow) { orbStateNow = state; orbStateStart = 0; }
+    paintOrb(state, 0.6, voiceLevel);
+  }
+}
 const ERRORS = {
   'permission-denied': '麦克风权限未获允许。可在系统设置中允许后重试，或用键盘输入。',
   'permission-timeout': '等待麦克风授权超时，已停止本次请求。可重试或用键盘输入。',
@@ -23,6 +208,7 @@ let disposed = false;
 let unsubscribe;
 let listenIntent = 0;
 let consumedIntent = -1;
+let preparedActivation = '';
 let lastSignalId = -1;
 let attempt;
 let captureActive = false;
@@ -42,6 +228,53 @@ let speech;
 let speechEpoch = 0;
 let speechTailTimer;
 let resolvedQuestion = '';
+
+// Exit: the helper pulls the frame into the orb on its own clock. The card is pinned to
+// the size it had when the exit began and scaled by exactly the same factor, so the whole
+// surface shrinks into the orb instead of being clipped by a closing frame — and because
+// nothing re-lays out, the sentence can never re-wrap mid-collapse.
+let leaveFrame;
+function followLeaveScale() {
+  if (disposed || panel.dataset.pinned !== '1') { leaveFrame = undefined; return; }
+  const width = Number.parseFloat(panel.style.getPropertyValue('--voice-leave-w')) || 0;
+  if (width > 0) {
+    const scale = Math.max(0, Math.min(1, window.innerWidth / width));
+    panel.style.setProperty('--voice-leave-scale', String(Math.round(scale * 1000) / 1000));
+  }
+  leaveFrame = window.requestAnimationFrame(followLeaveScale);
+}
+function pinContent() {
+  if (panel.dataset.pinned === '1') return;
+  const rect = panel.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  panel.style.setProperty('--voice-leave-w', `${Math.round(rect.width)}px`);
+  panel.style.setProperty('--voice-leave-h', `${Math.round(rect.height)}px`);
+  panel.style.setProperty('--voice-leave-scale', '1');
+  panel.classList.add('is-leaving');
+  panel.dataset.pinned = '1';
+  followLeaveScale();
+}
+function unpinContent() {
+  if (leaveFrame !== undefined) { window.cancelAnimationFrame(leaveFrame); leaveFrame = undefined; }
+  panel.classList.remove('is-leaving');
+  delete panel.dataset.pinned;
+}
+
+// The page loads before the first Host snapshot, so the interior must not animate its own
+// metrics towards a density the frame has not adopted yet. The guard lifts one task later,
+// after the first state has been applied at zero duration (a timer, not a frame callback:
+// the window may still be hidden when the state arrives).
+let mounted = false;
+function settleDensity() {
+  if (mounted) return;
+  mounted = true;
+  window.setTimeout(() => panel.classList.remove('is-mounted'), 0);
+}
+
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.round((Number.isFinite(ms) ? ms : 0) / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
 
 function showText(node, text) {
   // Host/Agent/typed/OS text is always data. Never parse it as HTML or a URL.
@@ -118,7 +351,9 @@ function stopCapture() {
   }
   captureActive = false;
   elapsedMs = 0;
+  voiceLevel = 0;
   ui.level.value = 0;
+  panel.style.setProperty('--voice-level', '0');
 }
 
 function questionKey(state = host) {
@@ -233,7 +468,10 @@ function beginCapture() {
     onLevel(level) {
       if (attempt !== current || current.cancelled) return;
       elapsedMs = level.elapsedMs;
-      ui.level.value = Math.min(1, level.rms * 5);
+      const value = Math.min(1, level.rms * 5);
+      ui.level.value = value;
+      voiceLevel = value;
+      panel.style.setProperty('--voice-level', String(value.toFixed(3)));
       render();
     },
     onResult: result => finalAudio(current, result),
@@ -339,6 +577,10 @@ function applyState(value) {
     lastSignalId = -1;
   }
   host = next;
+  if (shouldAutoPrepare({ phase: next.phase, canPrepare: next.canPrepare, captureIntent: isCaptureIntent(next), activationId: next.activationId, prepared: preparedActivation })) {
+    preparedActivation = next.activationId;
+    requestAction('prepare');
+  }
   const nextIntent = isCaptureIntent(next);
   if (nextIntent && (changedActivation || !isCaptureIntent(previous) || changedQuestion)) {
     listenIntent++;
@@ -378,6 +620,7 @@ function applyState(value) {
   if (stateAdvanced && ['ready', 'question', 'done', 'error'].includes(next.phase)) clearOperationTimer();
   feedbackRetention = updateFeedbackRetention(feedbackRetention, host, host.phase === 'done' && (typingOpen || readingFeedback()));
   render();
+  settleDensity();
   syncFeedbackTimer();
   reconcile();
 }
@@ -421,6 +664,12 @@ function requestAction(name, cancelNotice = '') {
 
 function render() {
   if (disposed) return;
+  if (!host.visible) pinContent();
+  else if (panel.dataset.pinned === '1') unpinContent();
+  // Density is a pure policy over the Host phase, shared with the native helper so the
+  // frame and the interior can never disagree about which shape this task has.
+  const density = panelDensity(host.phase);
+  if (panel.dataset.density !== density) panel.dataset.density = density;
   const exists = hasBridge && Boolean(host.activationId) && host.visible;
   const recording = Boolean(attempt);
   const busy = Boolean(submission) || ['preparing', 'transcribing', 'working'].includes(host.phase);
@@ -431,11 +680,36 @@ function render() {
     captureActive, recording, elapsedMs, speaking: Boolean(speech), submitting: Boolean(submission),
     hasError: Boolean(localError), hasNotice: Boolean(localNotice), needsExplicitStart,
   });
-  if (ui.status.textContent !== status) ui.status.textContent = status;
+  // While the microphone is open the big tabular timer is the proof of recording, so the
+  // subtitle stops counting seconds and says what stops it instead.
+  const listeningNow = captureActive && Boolean(attempt);
+  const shownStatus = listeningNow ? '正在听 · 停顿约 1.1 秒自动提交' : status;
+  if (ui.status.textContent !== shownStatus) ui.status.textContent = shownStatus;
   ui.status.title = status;
+  // Hide it visually when the result sentence already says it, but keep it announced.
+  const redundantStatus = host.phase === 'done' && Boolean(host.message) && !localNotice && !listeningNow;
+  ui.status.classList.toggle('sr-only', redundantStatus);
+  panel.classList.toggle('is-typing', typingOpen);
+  if (ui.timer) {
+    if (listeningNow) {
+      const stamp = formatElapsed(elapsedMs);
+      if (ui.timer.textContent !== stamp) ui.timer.textContent = stamp;
+      ui.timer.hidden = false;
+    } else if (!ui.timer.hidden) {
+      ui.timer.hidden = true;
+      ui.timer.textContent = '';
+    }
+  }
   panel.dataset.phase = localError ? 'error' : recording ? 'listening' : typingOpen || needsExplicitStart ? 'ready' : host.phase;
   // Motion keyed to what is actually happening (real capture / real work), not to a guess.
   panel.dataset.activity = localError || host.phase === 'error' ? 'error' : panelActivity(host.phase, captureActive);
+  const state = orbState();
+  const halo = state === 'rest' ? '0.28' : state === 'burst' ? '0.85' : '0.58';
+  if (panel.dataset.halo !== halo) {
+    panel.dataset.halo = halo;
+    panel.style.setProperty('--voice-halo', halo);
+  }
+  syncOrb();
   let label = '开始说话';
   if (recording) label = captureActive ? '停止提交' : '停止';
   else if (speech) label = '跳过朗读';
@@ -446,12 +720,20 @@ function render() {
   else if (needsExplicitStart && ['ready', 'listening', 'question'].includes(host.phase)) label = '开始说话';
   else if (host.phase === 'question') label = '回答';
   else if (host.phase === 'done') label = '再次说话';
-  ui.primary.textContent = label;
+  // The primary control is an icon button; its visible glyph is driven by data-mode and
+  // its name stays available to assistive tech.
+  ui.primary.setAttribute('aria-label', label);
+  ui.primary.title = label;
+  ui.primary.dataset.mode = busy ? 'busy' : host.phase === 'question' ? 'answer' : speech ? 'skip' : 'mic';
   ui.primary.disabled = !exists || Boolean(actionPending) || (busy && !recording && !speech);
   ui.cancel.disabled = !exists;
-  ui.cancel.textContent = host.phase === 'done' ? '收起' : '取消';
+  const cancelLabel = host.phase === 'done' ? '收起' : '取消';
+  ui.cancel.setAttribute('aria-label', cancelLabel);
   ui.cancel.title = host.phase === 'done' ? '收起结果（Esc）' : '取消本次任务（Esc）';
-  showText(ui.echo, selectPanelEcho({ phase: host.phase, message: host.message, captureActive }));
+  ui.cancel.dataset.mode = host.phase === 'done' ? 'dismiss' : 'cancel';
+  // The idle screen invites one sentence; every other title is the Host's own words.
+  const invitation = !host.message && !localError && !recording && host.phase === 'ready' ? '说一句要找什么' : '';
+  showText(ui.echo, selectPanelEcho({ phase: host.phase, message: host.message, captureActive }) || invitation);
   showText(ui.error, localError || (host.phase === 'error' ? host.message || '任务未完成，请重试。' : ''));
   showText(ui.detail, host.detail);
   ui.progress.hidden = host.phase !== 'preparing';
@@ -470,7 +752,10 @@ function render() {
   ui.hint.textContent = hint;
   ui.hint.title = hint;
   ui['typing-toggle'].disabled = !exists || busy || Boolean(actionPending);
-  ui['typing-toggle'].textContent = typingOpen ? '收起输入' : '键盘输入';
+  // The toggle is an icon button now: its name lives in aria-label, never as text.
+  const typingLabel = typingOpen ? '收起键盘输入' : '改用键盘输入';
+  ui['typing-toggle'].setAttribute('aria-label', typingLabel);
+  ui['typing-toggle'].title = typingLabel;
   ui['typing-toggle'].setAttribute('aria-expanded', String(typingOpen));
   ui['text-form'].hidden = !typingOpen;
   ui['text-input'].disabled = busy || !exists;
@@ -578,6 +863,9 @@ function dispose() {
 }
 window.addEventListener('pagehide', dispose, { once: true });
 window.addEventListener('beforeunload', dispose, { once: true });
+readOrbPalette();
+reducedMotion?.addEventListener?.('change', () => { syncOrb(); render(); });
+syncOrb();
 render();
 if (hasBridge) {
   let receivedEvent = false;

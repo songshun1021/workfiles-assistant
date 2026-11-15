@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作资料助手 · 液体玻璃 · 端到端</title>
+<style>
+  :root{
+    --ease: cubic-bezier(.22,.61,.36,1);
+    --ease-out: cubic-bezier(.16,.84,.3,1);
+    --rail-w: 372px;
+    font-family: "SF Pro Text", -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  *{ box-sizing:border-box }
+  html,body{ margin:0 }
+  body{
+    min-height:100vh; background:#0a0b0f; color:#e7eaf0;
+    padding:18px 20px 28px; display:grid; gap:14px; align-content:start;
+  }
+
+  /* ---------------- page chrome ---------------- */
+  .hd{ display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap }
+  .hd h1{ margin:0; font-size:15px; font-weight:620; letter-spacing:-.01em }
+  .hd p{ margin:4px 0 0; font-size:12px; color:#858c99 }
+  .hd-act{ margin-left:auto; display:flex; gap:6px; flex-wrap:wrap }
+  .ghost{
+    font:inherit; font-size:11.5px; color:#b3bac6; background:#15171d; border:1px solid #272b33;
+    border-radius:999px; padding:5px 11px; cursor:pointer; transition:all .16s var(--ease);
+  }
+  .ghost:hover{ color:#fff; border-color:#454b56 }
+  .ghost[aria-pressed="true"]{ background:#e7eaf0; color:#0a0b0f; border-color:#e7eaf0 }
+  .seg{ display:flex; gap:2px; padding:2px; border-radius:999px; background:#15171d; border:1px solid #272b33 }
+  .seg button{
+    font:inherit; font-size:11.5px; color:#9aa1ad; background:transparent; border:0; border-radius:999px;
+    padding:4px 11px; cursor:pointer; transition:all .16s var(--ease);
+  }
+  .seg button:hover{ color:#fff }
+  .seg button[aria-pressed="true"]{ background:#e7eaf0; color:#0a0b0f }
+
+  .layout{ display:grid; grid-template-columns:minmax(0,1fr) var(--rail-w); gap:18px; align-items:start }
+  .layout[data-rail="off"]{ grid-template-columns:minmax(0,1fr) }
+  .layout[data-rail="off"] .rail{ display:none }
+  @media (max-width:1120px){ .layout{ grid-template-columns:minmax(0,1fr) } .rail{ position:static; max-height:none } }
+
+  /* ---------------- stage / fake desktop ---------------- */
+  .stage-col{ display:grid; gap:10px; min-width:0 }
+  .desk{
+    position:relative; height:392px; border-radius:22px; overflow:hidden;
+    display:grid; place-items:center; padding:20px;
+    box-shadow:0 0 0 1px rgb(255 255 255 / .06), 0 30px 60px -30px rgb(0 0 0 / .9);
+  }
+  .desk[data-wall="light"]{
+    background:
+      radial-gradient(120% 80% at 16% 4%, #ffffff 0%, rgb(255 255 255 / 0) 55%),
+      radial-gradient(90% 70% at 84% 10%, #dfeafa 0%, rgb(223 234 250 / 0) 62%),
+      radial-gradient(120% 95% at 50% 104%, #c3d3e6 0%, rgb(195 211 230 / 0) 66%),
+      linear-gradient(152deg,#e7eff9 0%,#d3dfee 46%,#bccbdf 100%);
+  }
+  .desk[data-wall="dark"]{
+    background:
+      radial-gradient(120% 80% at 18% 0%, #2c3648 0%, rgb(44 54 72 / 0) 56%),
+      radial-gradient(100% 85% at 84% 18%, #1e2b3d 0%, rgb(30 43 61 / 0) 62%),
+      linear-gradient(152deg,#161c26 0%,#10151d 56%,#0a0e14 100%);
+  }
+  .desk::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    box-shadow:inset 0 0 90px 10px rgb(10 20 40 / .16);
+  }
+  .mock{
+    position:absolute; border-radius:14px; pointer-events:none;
+    background:rgb(255 255 255 / .5); backdrop-filter:blur(4px);
+    box-shadow:0 22px 44px -22px rgb(20 40 80 / .38), 0 1px 0 rgb(255 255 255 / .8) inset;
+  }
+  .desk[data-wall="dark"] .mock{ background:rgb(255 255 255 / .06); box-shadow:0 22px 44px -22px rgb(0 0 0 / .8), 0 1px 0 rgb(255 255 255 / .08) inset }
+  .m1{ width:330px; height:206px; left:-82px; top:34px; transform:rotate(-2.2deg) }
+  .m2{ width:270px; height:174px; right:-62px; bottom:-34px; transform:rotate(2.6deg) }
+  /* a document silhouette behind the panel: the blurred lines are what the glass has to bend */
+  .m1::before{
+    content:""; position:absolute; left:18px; right:18px; top:16px; height:6px; border-radius:3px;
+    background:rgb(47 111 208 / .45);
+  }
+  .m1::after{
+    content:""; position:absolute; left:18px; right:18px; top:36px; bottom:18px; border-radius:4px;
+    background:repeating-linear-gradient(180deg, rgb(20 45 85 / .17) 0 3px, transparent 3px 13px);
+  }
+  .desk[data-wall="dark"] .m1::before{ background:rgb(120 174 255 / .5) }
+  .desk[data-wall="dark"] .m1::after{ background:repeating-linear-gradient(180deg, rgb(220 235 255 / .14) 0 3px, transparent 3px 13px) }
+  .m3,.m4{ position:absolute; pointer-events:none; border-radius:11px; overflow:hidden;
+    box-shadow:0 18px 36px -20px rgb(20 40 80 / .45), 0 1px 0 rgb(255 255 255 / .7) inset }
+  .m3{ width:196px; height:126px; left:142px; top:188px; background:#fff; transform:rotate(-1.4deg) }
+  .m3::before{ content:""; position:absolute; inset:0 0 auto; height:24px; background:linear-gradient(90deg,#3f7fdd,#6aa6f2) }
+  .m3::after{ content:""; position:absolute; left:14px; right:14px; top:40px; bottom:14px; border-radius:4px;
+    background:repeating-linear-gradient(180deg, rgb(20 45 85 / .16) 0 3px, transparent 3px 12px) }
+  .m4{ width:176px; height:120px; right:52px; top:198px; transform:rotate(2deg);
+    background:linear-gradient(152deg,#ffd9b0,#f7a9a0 46%,#d9a4e6) }
+  .desk[data-wall="dark"] .m3{ background:#1b212b; box-shadow:0 18px 36px -20px rgb(0 0 0 / .8), 0 1px 0 rgb(255 255 255 / .1) inset }
+  .desk[data-wall="dark"] .m3::after{ background:repeating-linear-gradient(180deg, rgb(220 235 255 / .14) 0 3px, transparent 3px 12px) }
+  .desk[data-wall="dark"] .m4{ filter:saturate(.8) brightness(.72) }
+  .glow{ position:absolute; border-radius:50%; pointer-events:none; filter:blur(26px) }
+  .g1{ width:380px; height:380px; right:-70px; top:-140px; background:radial-gradient(circle, rgb(120 170 255 / .5), transparent 68%) }
+  .g2{ width:340px; height:340px; left:-90px; bottom:-140px; background:radial-gradient(circle, rgb(255 188 148 / .3), transparent 70%) }
+  .desk[data-wall="dark"] .g1{ background:radial-gradient(circle, rgb(72 112 190 / .5), transparent 68%) }
+  .desk[data-wall="dark"] .g2{ background:radial-gradient(circle, rgb(158 104 62 / .26), transparent 70%) }
+
+  /* ---------------- the floating panel ---------------- */
+  .win{
+    --orb:74px;
+    position:relative; z-index:2;
+    display:grid; grid-template-columns:var(--orb) minmax(0,1fr); column-gap:14px; align-items:center;
+    padding:15px 16px 15px 15px; border-radius:19px;
+    background:var(--f-bg); border:1px solid var(--f-line);
+    box-shadow:var(--f-shadow);
+    backdrop-filter:blur(16px) saturate(195%) brightness(1.03);
+    -webkit-backdrop-filter:blur(16px) saturate(195%) brightness(1.03);
+    color:var(--f-ink);
+    transition:width .34s var(--ease), height .34s var(--ease), opacity .34s var(--ease),
+               transform .42s var(--ease-out), filter .34s var(--ease), background .3s var(--ease);
+  }
+  .win[data-size="full"]{ width:620px; height:200px }
+  .win[data-size="compact"]{ width:460px; height:124px; --orb:64px }
+  .win[data-visible="false"]{ opacity:0; transform:translateY(8px) scale(.985); filter:blur(3px) }
+  .desk[data-panel="light"] .win{
+    --f-bg:
+      radial-gradient(132% 62% at 50% -16%, rgb(255 255 255 / .62), rgb(255 255 255 / 0) 62%),
+      linear-gradient(162deg, rgb(255 255 255 / .42), rgb(255 255 255 / .14) 48%, rgb(255 255 255 / .3));
+    --f-line:rgb(255 255 255 / .4);
+    --f-ink:#0d1520; --f-ink-2:#31445c; --f-muted:#6b7d93;
+    --f-accent:#2f6fd0; --f-on-accent:#ffffff;
+    --f-accent-soft:rgb(47 111 208 / .1);
+    --f-chip:rgb(13 21 32 / .07);
+    --f-hair:rgb(13 21 32 / .13);
+    --f-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / .3),
+      inset 0 1px 0 rgb(255 255 255 / 1),
+      inset 0 0 26px -4px rgb(255 255 255 / .55),
+      inset 0 -26px 44px -30px rgb(47 111 208 / .38),
+      0 0 0 .5px rgb(17 40 76 / .13),
+      0 30px 56px -28px rgb(17 40 76 / .55),
+      0 10px 22px -16px rgb(17 40 76 / .34);
+  }
+  .desk[data-panel="dark"] .win{
+    --f-bg:
+      radial-gradient(132% 62% at 50% -16%, rgb(255 255 255 / .2), rgb(255 255 255 / 0) 62%),
+      linear-gradient(162deg, rgb(255 255 255 / .14), rgb(255 255 255 / .045) 48%, rgb(255 255 255 / .1));
+    --f-line:rgb(255 255 255 / .22);
+    --f-ink:#eef2f9; --f-ink-2:#c3cfe0; --f-muted:#95a2b6;
+    --f-accent:#78aeff; --f-on-accent:#08111e;
+    --f-accent-soft:rgb(120 174 255 / .18);
+    --f-chip:rgb(255 255 255 / .085);
+    --f-hair:rgb(255 255 255 / .16);
+    --f-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / .16),
+      inset 0 1px 0 rgb(255 255 255 / .38),
+      inset 0 0 26px -6px rgb(255 255 255 / .18),
+      inset 0 -26px 44px -30px rgb(120 174 255 / .32),
+      0 30px 56px -26px rgb(0 0 0 / .85);
+  }
+
+  /* ---------------- surface: liquid glass, one layer ----------------
+     Only the panel body filters the backdrop. Every "thick glass at the rim" cue
+     below is painted (inner shadows + a 1px rim gradient + a drifting sheen), so
+     there is no second filtered layer and no boundary where one layer ends. */
+  .win::before, .win::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; z-index:0 }
+
+  .win::before{
+    background:linear-gradient(115deg, transparent 28%, rgb(255 255 255 / .2) 44%,
+      transparent 58%, rgb(255 255 255 / .09) 72%, transparent 84%);
+    background-size:280% 100%; background-position:0% 0;
+    mix-blend-mode:screen; opacity:.8;
+    animation:sheen 13s linear infinite;
+  }
+  .win::after{
+    padding:1px;
+    background:linear-gradient(150deg,
+      rgb(255 255 255 / .9) 0%, rgb(255 255 255 / .08) 18%,
+      rgb(255 255 255 / .5) 38%, rgb(255 255 255 / .05) 62%,
+      rgb(255 255 255 / .65) 84%, rgb(255 255 255 / .18) 100%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude;
+  }
+  .desk[data-panel="dark"] .win::after{
+    background:linear-gradient(150deg,
+      rgb(255 255 255 / .62) 0%, rgb(255 255 255 / .04) 20%,
+      rgb(255 255 255 / .3) 40%, rgb(255 255 255 / .03) 62%,
+      rgb(255 255 255 / .4) 84%, rgb(255 255 255 / .08) 100%);
+  }
+  @keyframes sheen{ from{ background-position:0% 0 } to{ background-position:100% 0 } }
+  @media (prefers-reduced-motion: reduce){ .win::before{ animation:none } }
+
+  .orb-wrap{ position:relative; z-index:1; width:var(--orb); height:var(--orb); display:grid; place-items:center }
+  .orb-wrap::before{
+    content:""; position:absolute; inset:-18%; border-radius:50%;
+    background:radial-gradient(circle, color-mix(in srgb, var(--f-accent) 22%, transparent) 0%, transparent 68%);
+    opacity:var(--halo,.55); transition:opacity .5s var(--ease);
+  }
+  .orb-wrap canvas{ position:relative; width:100%; height:100%; display:block }
+
+  .content{ position:relative; z-index:1; min-width:0; display:grid; gap:6px; align-content:center }
+  .line{ display:flex; align-items:center; gap:10px; min-width:0 }
+
+  .title{
+    flex:1 1 auto; min-width:0; margin:0; font-size:15px; font-weight:600; letter-spacing:-.012em;
+    line-height:1.35; color:var(--f-ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .win[data-size="compact"] .title{ font-size:14px }
+  .sub{ margin:0; font-size:11.5px; line-height:1.4; color:var(--f-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .note{ margin:0; font-size:10.5px; line-height:1.4; color:var(--f-muted) }
+  .tmr{ font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:.01em; color:var(--f-ink) }
+
+  .scope-b{
+    font:inherit; font-size:11px; color:var(--f-muted); background:transparent; border:0; padding:0;
+    cursor:pointer; display:inline-flex; align-items:center; gap:5px; border-bottom:1px dashed var(--f-hair);
+  }
+  .scope-b:hover{ color:var(--f-ink-2) }
+
+  .chips{ display:flex; gap:5px; flex-wrap:nowrap; overflow:hidden; min-width:0 }
+  .chip{
+    font-size:11px; line-height:1.5; padding:2px 8px; border-radius:999px;
+    background:var(--f-chip); color:var(--f-muted); white-space:nowrap; flex:0 0 auto;
+  }
+  .chip[data-hit="1"]{ color:var(--f-ink); font-weight:560 }
+
+  .rows{ display:grid; gap:2px; min-width:0 }
+  .row{
+    position:relative; display:flex; align-items:center; gap:9px; width:100%; min-width:0;
+    font:inherit; text-align:left; color:var(--f-ink); cursor:pointer;
+    background:transparent; border:0; border-radius:9px; padding:5px 8px 5px 10px;
+    transition:background .16s var(--ease);
+  }
+  .row:hover{ background:var(--f-chip) }
+  .row[aria-selected="true"]{ background:var(--f-accent-soft) }
+  .row[aria-selected="true"]::before{
+    content:""; position:absolute; left:0; top:6px; bottom:6px; width:2.5px; border-radius:3px; background:var(--f-accent);
+  }
+  .row .nm{ flex:1 1 auto; min-width:0; font-size:12.5px; font-weight:560; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .row .mt{ flex:0 0 auto; font-size:10.5px; color:var(--f-muted); white-space:nowrap }
+  .row .tg{ flex:0 0 auto; font-size:10px; color:var(--f-muted); border:1px solid var(--f-hair); border-radius:999px; padding:1px 6px }
+  .row.ans .nm{ font-size:12.5px; font-weight:560 }
+  .row.act, .row.ans{ background:var(--f-accent-soft) }
+  .row.act:hover, .row.ans:hover{ background:color-mix(in srgb, var(--f-accent) 16%, transparent) }
+  .row.act .nm, .row.ans .nm{ color:var(--f-accent); font-weight:600 }
+  .row .go{ flex:0 0 auto; font-size:14px; line-height:1; color:var(--f-accent); opacity:.7 }
+  .row.act .tg{ border-color:color-mix(in srgb, var(--f-accent) 30%, transparent); color:var(--f-accent) }
+  .icon.lead{ width:30px; height:30px; border-radius:50%; color:var(--f-accent); background:var(--f-accent-soft) }
+  .icon.lead:hover{ background:color-mix(in srgb, var(--f-accent) 17%, transparent); color:var(--f-accent) }
+
+  .acts{ display:flex; align-items:center; gap:6px; flex:0 0 auto; margin-left:auto }
+  .icon{
+    width:26px; height:26px; display:grid; place-items:center; padding:0; cursor:pointer;
+    font:inherit; font-size:13px; line-height:1; color:var(--f-muted);
+    background:transparent; border:0; border-radius:8px; transition:all .16s var(--ease);
+  }
+  .icon:hover{ color:var(--f-ink); background:var(--f-chip) }
+  .icon svg{ width:15px; height:15px; display:block }
+  .icon.rec{ color:var(--f-ink); background:var(--f-chip); border-radius:999px }
+  .icon.rec svg{ width:11px; height:11px }
+  .pill{
+    font:inherit; font-size:12px; font-weight:600; letter-spacing:.01em; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 12px; border-radius:999px; border:0;
+    background:var(--f-accent); color:var(--f-on-accent);
+    box-shadow:0 1px 0 rgb(255 255 255 / .3) inset, 0 5px 12px -6px color-mix(in srgb, var(--f-accent) 70%, transparent);
+    transition:transform .16s var(--ease), filter .16s var(--ease);
+  }
+  .pill:hover{ filter:brightness(1.06) }
+  .pill:active{ transform:scale(.97) }
+  .pill .kbd{ font-size:10px; opacity:.62; font-weight:500 }
+
+  /* tier annotation */
+  .win.anno [data-tier="1"]{ outline:1.5px solid var(--f-accent); outline-offset:3px; border-radius:8px }
+  .win.anno [data-tier="2"]{ outline:1px dashed color-mix(in srgb, var(--f-ink) 46%, transparent); outline-offset:3px; border-radius:8px }
+  .win.anno [data-tier="3"]{ outline:1px dotted color-mix(in srgb, var(--f-muted) 72%, transparent); outline-offset:3px; border-radius:8px }
+
+  .content > *, .acts > *{ animation:rise .34s var(--ease-out) both }
+  .rows .row{ animation:rise .3s var(--ease-out) both }
+  .rows .row:nth-child(2){ animation-delay:.04s }
+  .rows .row:nth-child(3){ animation-delay:.08s }
+  @keyframes rise{ from{ opacity:0; transform:translateY(4px) } to{ opacity:1; transform:none } }
+
+  /* ---------------- readout + controls ---------------- */
+  .readout{
+    display:flex; align-items:center; gap:12px; font-size:11px; color:#7f8796;
+    font-family:"SF Mono", ui-monospace, Menlo, monospace; padding-left:2px;
+  }
+  .readout .ro-hint{ margin-left:auto; font-family:inherit; font-size:11px; color:#5f6674 }
+  .ctl{ display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+  .talk{
+    font:inherit; font-size:12.5px; font-weight:600; color:#0a0b0f; background:#e7eaf0;
+    border:0; border-radius:999px; padding:8px 18px; cursor:pointer; transition:all .16s var(--ease);
+    user-select:none; -webkit-user-select:none; touch-action:none;
+  }
+  .talk:hover{ background:#fff }
+  .talk:active{ transform:scale(.985) }
+  .sel{ display:inline-flex; align-items:center; gap:7px; font-size:11.5px; color:#858c99 }
+  .sel select{
+    font:inherit; font-size:11.5px; color:#c6ccd8; background:#15171d; border:1px solid #272b33;
+    border-radius:8px; padding:5px 8px; cursor:pointer;
+  }
+
+  /* ---------------- rail ---------------- */
+  .rail{
+    position:sticky; top:18px; max-height:calc(100vh - 36px); overflow:auto;
+    background:#101217; border:1px solid #21252d; border-radius:16px; padding:14px 14px 16px;
+    display:grid; gap:14px; font-size:12px; color:#b7bec9;
+    scrollbar-width:thin;
+  }
+  .rail-head{ display:flex; align-items:center }
+  .rail-t{ font-size:12px; font-weight:620; color:#e7eaf0; letter-spacing:.01em }
+  .rail-head .ghost{ margin-left:auto; font-size:10.5px; padding:3px 9px }
+  .blk{ display:grid; gap:8px }
+  .blk-k{ margin:0; font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:#6d7482 }
+  .blk-k b{ color:#e7eaf0; letter-spacing:0; text-transform:none; font-size:12px }
+  .spec{ margin:0; display:grid; grid-template-columns:70px minmax(0,1fr); gap:6px 10px; align-items:baseline }
+  .spec dt{ font-size:11px; color:#6d7482; display:flex; align-items:center; gap:5px }
+  .spec dt.no{ color:#5d636e }
+  .spec dd{ margin:0; font-size:11.5px; color:#c6ccd8; line-height:1.45 }
+  .spec i{ width:7px; height:7px; border-radius:2px; flex:0 0 auto }
+  .t1{ background:#78aeff; box-shadow:0 0 0 2px rgb(120 174 255 / .18) }
+  .t2{ background:#6b7482 }
+  .t3{ background:#39404c }
+  .why{ margin:0; font-size:11.5px; line-height:1.6; color:#8f97a4; padding-top:2px; border-top:1px solid #1c2028 }
+  .rules{ margin:0; padding-left:16px; display:grid; gap:7px; font-size:11.5px; line-height:1.55; color:#9aa2ae }
+  .rules b{ color:#d5dae2; font-weight:600 }
+  .chain{ margin:0; padding:0; list-style:none; display:grid; gap:2px }
+  .chain button{
+    width:100%; display:flex; align-items:center; gap:9px; font:inherit; font-size:11.5px;
+    color:#9aa2ae; background:transparent; border:0; border-radius:8px; padding:5px 8px; cursor:pointer;
+    text-align:left; transition:all .14s var(--ease);
+  }
+  .chain button:hover{ background:#171a21; color:#e7eaf0 }
+  .chain button[aria-current="true"]{ background:#1b2029; color:#fff }
+  .chain .ix{ font-size:9.5px; color:#5d636e; font-variant-numeric:tabular-nums; width:14px }
+  .chain button[aria-current="true"] .ix{ color:#78aeff }
+  .chain .st{ margin-left:auto; font-size:9.5px; color:#5d636e }
+  @media (prefers-reduced-motion: reduce){
+    .win, .content > *, .rows .row{ transition:none; animation:none }
+  }
+</style>
+</head>
+<body>
+
+<header class="hd">
+  <div>
+    <h1>工作资料助手 · 端到端交付原型<span style="color:#5d636e;font-weight:400"> · 液体玻璃</span></h1>
+    <p>说话 → 识别 → 思考 → 结果 → 打开 → 收尾。只做这一个悬浮窗，不做背景。</p>
+  </div>
+  <div class="hd-act">
+    <button type="button" class="ghost" id="btn-anno" aria-pressed="false">标注层级</button>
+    <button type="button" class="ghost" id="btn-dark" aria-pressed="false">暗色面板</button>
+    <button type="button" class="ghost" id="btn-wall" aria-pressed="false">深色桌面</button>
+    <button type="button" class="ghost" id="btn-rail" aria-pressed="true">设计说明</button>
+  </div>
+</header>
+
+<main class="layout" id="layout" data-rail="on">
+  <section class="stage-col">
+    <div class="desk" id="desk" data-wall="light" data-panel="light">
+      <div class="glow g1"></div>
+      <div class="glow g2"></div>
+      <div class="m3"></div>
+      <div class="m4"></div>
+      <div class="mock m1"></div>
+      <div class="mock m2"></div>
+
+      <div class="win" id="win" data-phase="ready" data-size="full" data-visible="true" role="group" aria-label="工作资料助手面板">
+        <div class="orb-wrap"><canvas id="orb" aria-hidden="true"></canvas></div>
+        <div class="content" id="body"></div>
+        <div class="acts" id="acts"></div>
+      </div>
+    </div>
+
+    <div class="readout">
+      <span id="ro-size">620 × 200</span>
+      <span id="ro-phase">待命</span>
+      <span class="ro-hint">按住空格说话 · ⏎ 打开 / 确认 · Esc 取消</span>
+    </div>
+
+    <div class="ctl">
+      <button type="button" class="talk" id="talk">按住说话</button>
+      <button type="button" class="ghost" id="btn-replay">重播整条链路</button>
+      <label class="sel">分支
+        <select id="scenario">
+          <option value="hit">正常命中 · 2 份</option>
+          <option value="clarify">先追问 · 有歧义</option>
+          <option value="empty">范围内没找到</option>
+          <option value="gone">打开时文件不在了</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <aside class="rail" id="rail" aria-label="设计说明">
+    <div class="rail-head">
+      <span class="rail-t">这次收敛了什么</span>
+      <button type="button" class="ghost" id="rail-hide">收起</button>
+    </div>
+
+    <section class="blk">
+      <p class="blk-k">现在 · <b id="sp-name">待命</b></p>
+      <dl class="spec">
+        <dt>展示</dt><dd id="sp-show"></dd>
+        <dt><i class="t1"></i>必须看到</dt><dd id="sp-t1"></dd>
+        <dt><i class="t2"></i>次亮</dt><dd id="sp-t2"></dd>
+        <dt><i class="t3"></i>压暗</dt><dd id="sp-t3"></dd>
+        <dt class="no">不展示</dt><dd id="sp-deny"></dd>
+      </dl>
+      <p class="why" id="sp-why"></p>
+    </section>
+
+    <section class="blk">
+      <p class="blk-k">四条硬规则</p>
+      <ol class="rules">
+        <li><b>蓝色是指针，不是装饰。</b>一个状态里只有一处主蓝：当下该被决定的那一处。</li>
+        <li><b>动＝系统在忙，静＝轮到你。</b>只有真正结束才向外爆一次，其余动作都不表示进度。</li>
+        <li><b>原文不删，只降级。</b>标题 → 次行 → 芯片，你说过的那句始终在场。</li>
+        <li><b>不做假数据。</b>没有流式字幕、没有百分比、没有“正在思考”这类元话术。</li>
+      </ol>
+    </section>
+
+    <section class="blk">
+      <p class="blk-k">链路 · 点一步定格</p>
+      <ol class="chain" id="chain"></ol>
+    </section>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = sel => document.querySelector(sel);
+  const win = $('#win'), bodyEl = $('#body'), actsEl = $('#acts'), orb = $('#orb');
+  const desk = $('#desk'), layout = $('#layout');
+
+  /* ------------------------------------------------------------------ data */
+  const SAY = '帮我找一下上周给华润做的那版报价方案';
+
+  const SCENARIOS = {
+    hit: {
+      say: SAY,
+      chips: [{ t:'华润', hit:true }, { t:'报价 方案', hit:true }, { t:'近 7 天' }, { t:'6 个应用' }],
+      question: '「方案」是华润那版，还是上周那版？',
+      answers: ['华润那版', '上周那版'],
+      hits: [
+        { nm:'华润报价方案 v3.pptx', mt:'华润项目 · 昨天 18:20', tg:'标题命中' },
+        { nm:'华润-报价口径.xlsx',  mt:'桌面 · 前天 11:04',      tg:'内容命中' },
+        { nm:'华润-比价底稿.docx',  mt:'往来文件 · 11月2日',      tg:'内容命中' }
+      ],
+      wide: [
+        { nm:'华润报价方案 v3.pptx', mt:'华润项目 · 昨天 18:20', tg:'标题命中' },
+        { nm:'华润-报价口径.xlsx',  mt:'桌面 · 前天 11:04',      tg:'内容命中' },
+        { nm:'华润-比价底稿.docx',  mt:'往来文件 · 11月2日',      tg:'内容命中' }
+      ]
+    },
+    clarify: {
+      say: SAY,
+      chips: [{ t:'华润', hit:true }, { t:'报价 方案', hit:true }, { t:'近 7 天' }, { t:'6 个应用' }],
+      question: '「方案」是华润那版，还是上周那版？',
+      answers: ['华润那版', '上周那版'],
+      hits: [
+        { nm:'华润报价方案 v3.pptx', mt:'华润项目 · 昨天 18:20', tg:'标题命中' }
+      ],
+      wide: []
+    },
+    empty: {
+      say: SAY,
+      chips: [{ t:'华润', hit:true }, { t:'报价 方案', hit:true }, { t:'近 7 天' }, { t:'6 个应用' }],
+      question: '「方案」是华润那版，还是上周那版？',
+      answers: ['华润那版', '上周那版'],
+      hits: [],
+      wide: [
+        { nm:'华润报价方案 v3.pptx', mt:'华润项目 · 昨天 18:20', tg:'标题命中' },
+        { nm:'华润-报价口径.xlsx',  mt:'桌面 · 前天 11:04',      tg:'内容命中' },
+        { nm:'华润-比价底稿.docx',  mt:'往来文件 · 11月2日',      tg:'内容命中' }
+      ]
+    },
+    gone: {
+      say: SAY,
+      chips: [{ t:'华润', hit:true }, { t:'报价 方案', hit:true }, { t:'近 7 天' }, { t:'6 个应用' }],
+      question: '「方案」是华润那版，还是上周那版？',
+      answers: ['华润那版', '上周那版'],
+      hits: [
+        { nm:'华润报价方案 v3.pptx', mt:'华润项目 · 昨天 18:20', tg:'标题命中' }
+      ],
+      wide: []
+    }
+  };
+
+  const PHASE_NAMES = { ready:'待命', listening:'收听', transcribing:'识别', working:'思考', result:'结果', question:'澄清', empty:'空结果', done:'完成', error:'失败', scope:'范围' };
+  const ORB   = { ready:'rest', listening:'converge', transcribing:'flow', working:'scan', result:'hold', question:'hold', empty:'hold', done:'burst', error:'rest', scope:'rest' };
+  const SIZE  = { ready:'compact', listening:'compact', transcribing:'compact', working:'compact', result:'full', question:'full', empty:'full', done:'compact', error:'full', scope:'full' };
+
+  const SPEC = {
+    ready: {
+      show:'一句邀请 + 一行范围',
+      t1:'麦克风：唯一入口',
+      t2:'邀请语（先说清楚要什么）',
+      t3:'范围、可打字',
+      deny:'上次的结果、应用清单、历史记录',
+      why:'面板刚出现时用户只有一个问题：从哪开口。范围放一行，是因为“查哪儿”比“说什么”更容易被忽略。'
+    },
+    listening: {
+      show:'计时 + 一句“松开就结束”',
+      t1:'计时在走（真的在录）',
+      t2:'—',
+      t3:'松开提示',
+      deny:'实时字幕、声波频谱、“我在听了哦”',
+      why:'录音是唯一“正在被记录”的时刻，必须一眼确认：真的在录、能马上停。不做实时字幕——没有流式识别，做了就是骗人。'
+    },
+    transcribing: {
+      show:'识别结果一次性出现',
+      t1:'你说的那句话',
+      t2:'—',
+      t3:'“识别中”',
+      deny:'逐字打字机、置信度百分比',
+      why:'文字一次性淡入，不逐字打。这 800ms 是给人扫一眼有没有听错，✕ 全程可用。'
+    },
+    working: {
+      show:'原文 + 解析出的条件',
+      t1:'取消（唯一动作）',
+      t2:'原文、命中的词',
+      t3:'时间范围、应用数',
+      deny:'工具名、扫描进度、命中条数抖动、“正在思考”',
+      why:'这里最容易被假进度污染。改成展示“按什么条件查”：芯片是解析结果，球在扫说明还没完。没有百分比。'
+    },
+    result: {
+      show:'条数 + 最像的两份',
+      t1:'选中的那一行 + 打开',
+      t2:'另一份候选',
+      t3:'位置、时间、命中原因',
+      deny:'完整路径、全部 12 条、相关度分数、预览缩略图',
+      why:'只留这一屏真正要做的事：选哪份、按打开。候选最多两行，多的折叠成计数，避免把面板做成文件管理器。'
+    },
+    question: {
+      show:'一句追问 + 两个可选答案',
+      t1:'两个答案（同一个决定）',
+      t2:'问句',
+      t3:'“也可以直接说”',
+      deny:'解释为什么要问、模型的不确定性',
+      why:'只有“歧义会导致开错文件”时才追问，正常路径不打断。答案直接做成可点的行，说也行。'
+    },
+    empty: {
+      show:'没找到 + 两个下一步',
+      t1:'放宽范围',
+      t2:'换个说法',
+      t3:'到底查了什么',
+      deny:'道歉、“AI 也没办法”、建议联系管理员',
+      why:'没找到时最该给的不是道歉，是“下一步能做什么”和“到底查了什么范围”。范围写在最后一行，但它才是解释。'
+    },
+    done: {
+      show:'打开的是哪个文件',
+      t1:'文件名',
+      t2:'所在文件夹',
+      t3:'可能被挡住的提醒',
+      deny:'“已成功打开”（系统没回执）、路径、二次推荐',
+      why:'打开是系统接手，面板不谎称“已打开”。给文件名和文件夹让人能自己找，然后自己走开。'
+    },
+    error: {
+      show:'哪一步没成 + 唯一出口',
+      t1:'在访达里找找',
+      t2:'文件名',
+      t3:'可能的原因',
+      deny:'堆栈、错误码、“请重试”这类空话',
+      why:'失败只说哪一步没成，给唯一出口，不猜原因。'
+    },
+    scope: {
+      show:'这次允许查哪些应用',
+      t1:'—（只读说明，没有决定）',
+      t2:'应用名',
+      t3:'时间范围、只读承诺',
+      deny:'文档标题、窗口标题、网页地址',
+      why:'隐私契约要能随时翻开看：只列应用名，不列具体文档——这才是“范围”而不是“我看了什么”。'
+    }
+  };
+
+  const CHAIN = ['ready','listening','transcribing','working','result','question','empty','done','error','scope'];
+
+  /* ------------------------------------------------------------------ state */
+  const S = {
+    phase:'ready', size:'full', visible:true,
+    scenario:'hit', step:0, transcript:'', chips:[], rows:[], selected:0,
+    question:'', opened:'', scope:['近 7 天','6 个应用'],
+    holding:false, level:0, phaseStart:0, listenStart:0, preview:false
+  };
+  let timers = [];
+  const later = (ms, fn) => { const id = setTimeout(fn, ms); timers.push(id); return id; };
+  const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
+
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const sc = () => SCENARIOS[S.scenario];
+  const nth = n => (n < 10 ? '0' + n : String(n));
+  const fmt = ms => { const t = Math.max(0, Math.round(ms / 1000)); return Math.floor(t / 60) + ':' + nth(t % 60); };
+
+  /* ------------------------------------------------------- dot-matrix orb */
+  const BAYER = [
+    0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,
+    12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,
+    3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,
+    15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21
+  ].map(v => (v + 0.5) / 64);
+  const hash = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return v - Math.floor(v); };
+  const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const mix = (a, b, t) => {
+    const k = Math.max(0, Math.min(1, t)), A = rgb(a), B = rgb(b);
+    return `rgb(${Math.round(A[0] + (B[0] - A[0]) * k)} ${Math.round(A[1] + (B[1] - A[1]) * k)} ${Math.round(A[2] + (B[2] - A[2]) * k)})`;
+  };
+  const PAL = {
+    light: { lit:'#2560bd', dim:'#b9cfeb' },
+    dark:  { lit:'#a8ceff', dim:'#1a3358' }
+  };
+
+  function paint(canvas, state, t, level) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const size = canvas.clientWidth || 70;
+    const px = Math.round(size * dpr);
+    if (canvas.width !== px || canvas.height !== px) { canvas.width = px; canvas.height = px; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+
+    const pal = desk.dataset.panel === 'dark' ? PAL.dark : PAL.light;
+    const R = size * 0.43, spacing = Math.max(4.2, size / 14.5), c = size / 2;
+    const lx = -0.42, ly = -0.52, lz = 0.74;
+
+    const cycle = state === 'burst' ? 2.4 : 0;
+    const local = cycle ? (t % cycle) / cycle : 0;
+    const doneP = Math.min(1, local / 0.55);
+    const scanY = Math.sin(t * 1.1) * R * 0.85;
+    const flowP = Math.min(1, (t % 1.75) / 1.55);
+    const flowX = -R * 1.06 + flowP * R * 2.12;
+    const dim = state === 'rest';
+
+    for (let gy = -R; gy <= R; gy += spacing) {
+      for (let gx = -R; gx <= R; gx += spacing) {
+        const gridDist = Math.hypot(gx, gy);
+        if (gridDist > R) continue;
+
+        let x = gx, y = gy, radiusScale = 1, glow = 0, extraAlpha = 0;
+
+        if (state === 'converge') {
+          const pull = (0.06 + 0.20 * level) * (0.65 + 0.35 * Math.sin(t * 3.4));
+          x = gx * (1 - pull); y = gy * (1 - pull);
+          glow = Math.exp(-Math.pow(gridDist / R, 2) * 2.4) * (0.35 + 0.65 * level);
+          radiusScale = 0.86 + 0.30 * level;
+        } else if (state === 'scan') {
+          const band = Math.exp(-Math.pow((gy - scanY) / (R * 0.24), 2));
+          const sparkle = hash(gx, gy) > 0.88 ? Math.max(0, Math.sin(t * 5 + hash(gy, gx) * 12)) : 0;
+          x = gx + band * Math.sin(t * 9 + hash(gx, gy) * 8) * 0.9;
+          glow = 0.10 + band * 1.0 + sparkle * 0.65;
+          radiusScale = 0.72 + band * 0.7 + sparkle * 0.3;
+          extraAlpha = sparkle * 0.6;
+        } else if (state === 'flow') {
+          const passed = gx < flowX;
+          const edge = Math.abs(gx - flowX) < spacing * 1.2;
+          const dither = BAYER[(((Math.round(gy / spacing) % 8) + 8) % 8) * 8 + (((Math.round(gx / spacing) % 8) + 8) % 8)];
+          if (edge && dither < 0.5) { radiusScale = 0.5; glow = 0.2; }
+          else if (passed) { glow = 0.92 + 0.1 * Math.sin((gy / spacing) * 0.5 + t * 6); radiusScale = 1.08; }
+          else { glow = 0.015; radiusScale = 0.58; }
+        } else if (state === 'hold') {
+          glow = 0.6 + 0.07 * Math.sin(t * 1.35);
+          radiusScale = 1.0 + 0.02 * Math.sin(t * 1.35);
+        } else if (state === 'burst') {
+          const hold = local > 0.55;
+          const blast = Math.min(1, local / 0.55);
+          const ringR = hold ? R * 0.2 : R * (0.12 + blast * 1.32);
+          const collapse = hold ? 1 - Math.min(1, (local - 0.55) / 0.3) * 0.74 : 1;
+          x = gx * collapse; y = gy * collapse;
+          const shell = Math.exp(-Math.pow((gridDist - ringR) / (R * (hold ? 0.14 : 0.11)), 2));
+          glow = shell * (hold ? 0.85 : 1);
+          radiusScale = hold ? 1.05 : 0.6 + shell * 1.25;
+          extraAlpha = shell * (hold ? 0.35 : 0.6);
+        } else {
+          glow = 0;
+          radiusScale = 0.8 + 0.05 * Math.sin(t * 0.9);
+        }
+
+        const dist = Math.hypot(x, y);
+        const z = Math.sqrt(Math.max(0, R * R - dist * dist)) / R;
+        const nx = dist > 0 ? x / R : 0, ny = dist > 0 ? y / R : 0;
+        const lambert = Math.max(0, nx * lx + ny * ly + z * lz);
+        const light = Math.pow(lambert, 1.5);
+        const sphere = 0.3 + 0.7 * z;
+        const edgeFade = Math.min(1, (R - dist) / (spacing * 0.4));
+        const dotRadius = spacing * 0.44 * sphere * radiusScale * (0.42 + 0.8 * light) * edgeFade;
+        if (dotRadius <= 0.18) continue;
+
+        const shade = Math.min(1, Math.max(0, 1 - light * 0.95));
+        const base = 0.16 + 0.84 * Math.max(0, Math.min(1, 0.3 * light + glow));
+        ctx.globalAlpha = Math.min(1, base * (dim ? 0.72 : 1));
+        ctx.fillStyle = mix(pal.lit, pal.dim, shade * 0.85 - glow * 0.45);
+        ctx.beginPath();
+        ctx.arc(c + x, c + y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (glow > 0.78 || extraAlpha > 0.4) {
+          ctx.globalAlpha = Math.min(1, (glow * 0.7 + extraAlpha) * (dim ? 0.72 : 1));
+          ctx.fillStyle = pal.lit;
+          ctx.beginPath();
+          ctx.arc(c + x, c + y, dotRadius * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ------------------------------------------------------------- rendering */
+  const chipsHTML = list => `<div class="chips">${(list || []).map(c =>
+    `<span class="chip"${c.hit ? ' data-hit="1"' : ''}>${esc(c.t)}</span>`).join('')}</div>`;
+
+  const rowsHTML = (list, kind) => `<div class="rows">${list.map((r, i) => kind === 'file'
+    ? `<button type="button" class="row" data-row="${i}" aria-selected="${i === S.selected}" data-tier="${i === S.selected ? 1 : 2}">
+         <span class="nm">${esc(r.nm)}</span><span class="mt">${esc(r.mt)}</span><span class="tg">${esc(r.tg)}</span>
+       </button>`
+    : `<button type="button" class="row act" data-row="${i}" data-tier="${i === 0 ? 1 : 2}">
+         <span class="nm">${esc(r.nm)}</span>${r.mt ? `<span class="mt">${esc(r.mt)}</span>` : ''}${r.tg ? `<span class="tg">${esc(r.tg)}</span>` : ''}
+       </button>`).join('')}</div>`;
+
+  function bodyHTML() {
+    const scenario = sc();
+    switch (S.phase) {
+      case 'ready':
+        return `<div class="line"><p class="title" data-tier="2">说一句要找什么</p></div>
+                <p class="sub" data-tier="3">按住空格说话 · 也可以打字</p>
+                <div class="line"><button type="button" class="scope-b" data-act="scope" data-tier="3" title="这次允许查哪些应用">范围 · 近 7 天 · 6 个应用</button></div>`;
+
+      case 'listening':
+        return `<div class="line"><span class="tmr" id="tmr" data-tier="1">0:00</span></div>
+                <p class="sub" data-tier="3">正在听 · 松开就结束</p>`;
+
+      case 'transcribing':
+        return `<div class="line"><p class="title" data-tier="1">${esc(S.transcript)}</p></div>
+                <p class="sub" data-tier="3">${S.transcript ? '看是不是这句 · 错了按 Esc' : '正在识别…'}</p>`;
+
+      case 'working':
+        return `<div class="line"><p class="title" data-tier="2" title="${esc(S.transcript)}">${esc(S.transcript)}</p></div>
+                <div class="line">${chipsHTML(S.chips)}</div>`;
+
+      case 'result': {
+        const total = S.rows.length;
+        const shown = S.rows.slice(0, 2);
+        return `<div class="line"><p class="title" data-tier="2">找到 ${total} 份</p></div>
+                <p class="sub" data-tier="3">${total > 2 ? '只列最像的两份 · ' : ''}按标题和内容匹配 · ${esc(S.scope[0])}</p>
+                ${rowsHTML(shown, 'file')}`;
+      }
+
+      case 'question':
+        return `<div class="line"><p class="title" data-tier="2">${esc(S.question)}</p></div>
+                <div class="rows">${scenario.answers.map((a, i) =>
+                  `<button type="button" class="row ans" data-row="${i}" data-tier="1"><span class="nm">${esc(a)}</span></button>`).join('')}</div>
+                <p class="sub" data-tier="3">也可以直接说</p>`;
+
+      case 'empty':
+        return `<div class="line"><p class="title" data-tier="2">近 7 天里没找到「华润 报价」</p></div>
+                <div class="rows">
+                  <button type="button" class="row act" data-row="0" data-tier="1"><span class="nm">放宽到近 30 天再找一次</span><span class="tg">30 天</span><span class="go">›</span></button>
+                  <button type="button" class="row" data-row="1" data-tier="2"><span class="nm">换个说法</span><span class="mt">说客户名或文件名</span></button>
+                </div>
+                <p class="sub" data-tier="3">查了 6 个应用 · Edge 网页记录没开，没算进去</p>`;
+
+      case 'done':
+        return `<div class="line"><p class="title" data-tier="1">已交给系统打开</p></div>
+                <p class="sub" data-tier="2">${esc(S.opened)} · 华润项目</p>
+                <p class="note" data-tier="3">没弹出来的话，看看别的窗口</p>`;
+
+      case 'error':
+        return `<div class="line"><p class="title" data-tier="2">没能打开</p></div>
+                <p class="sub" data-tier="3">${esc(S.opened)}</p>
+                <div class="rows">
+                  <button type="button" class="row act" data-row="0" data-tier="1"><span class="nm">在访达里找找</span></button>
+                </div>
+                <p class="note" data-tier="3">文件可能被移走或改名了</p>`;
+
+      case 'scope':
+        return `<div class="line"><p class="title" data-tier="2">这次只在 6 个应用里找</p></div>
+                ${chipsHTML(['Word','PowerPoint','飞书','Finder','Codex','Edge'].map(t => ({ t })))}
+                <p class="sub" data-tier="3">近 7 天 · 只读，不改动文件 · 网页记录没开</p>`;
+
+      default:
+        return '';
+    }
+  }
+
+  const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5.5 10.5v1a6.5 6.5 0 0 0 13 0v-1M12 18v3M9 21h6"></path></svg>';
+  const STOP = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2.4"></rect></svg>';
+  const X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"></path></svg>';
+
+  function actsHTML() {
+    switch (S.phase) {
+      case 'ready':    return `<button type="button" class="icon lead" data-act="mic" title="按住说话" aria-label="按住说话">${MIC}</button>`;
+      case 'listening':return `<button type="button" class="icon rec" data-act="end" title="结束（松开也行）" aria-label="结束录音">${STOP}</button>`;
+      case 'scope':    return `<button type="button" class="icon" data-act="cancel" title="关闭" aria-label="关闭">${X}</button>`;
+      case 'result':   return `<button type="button" class="icon" data-act="cancel" title="关闭（Esc）" aria-label="关闭">${X}</button>
+                               <button type="button" class="pill" data-act="open" data-tier="1">打开<span class="kbd">↵</span></button>`;
+      case 'question': return `<button type="button" class="icon" data-act="cancel" title="关闭（Esc）" aria-label="关闭">${X}</button>
+                               <button type="button" class="icon" data-act="mic" title="直接说" aria-label="直接说">${MIC}</button>`;
+      case 'empty':    return `<button type="button" class="icon" data-act="cancel" title="关闭（Esc）" aria-label="关闭">${X}</button>`;
+      case 'error':    return `<button type="button" class="icon" data-act="cancel" title="关闭（Esc）" aria-label="关闭">${X}</button>`;
+      default:         return `<button type="button" class="icon" data-act="cancel" title="取消（Esc）" aria-label="取消">${X}</button>`;
+    }
+  }
+
+  function render() {
+    win.dataset.phase = S.phase;
+    win.dataset.size = S.size;
+    win.dataset.visible = String(S.visible);
+    bodyEl.innerHTML = bodyHTML();
+    actsEl.innerHTML = actsHTML();
+    // The action cluster lives inside the first text line, so the panel stays a
+    // two-column grid (orb | content) at every phase and the rows keep full width.
+    const firstLine = bodyEl.querySelector('.line');
+    if (firstLine) firstLine.appendChild(actsEl); else bodyEl.appendChild(actsEl);
+    win.style.setProperty('--halo', S.phase === 'ready' ? 0.3 : S.phase === 'done' ? 0.85 : 0.6);
+    $('#ro-size').textContent = S.size === 'full' ? '620 × 200' : '460 × 124';
+    $('#ro-phase').textContent = PHASE_NAMES[S.phase];
+    updateRail();
+  }
+
+  function updateRail() {
+    const spec = SPEC[S.phase] || SPEC.ready;
+    $('#sp-name').textContent = PHASE_NAMES[S.phase];
+    $('#sp-show').textContent = spec.show;
+    $('#sp-t1').textContent = spec.t1;
+    $('#sp-t2').textContent = spec.t2;
+    $('#sp-t3').textContent = spec.t3;
+    $('#sp-deny').textContent = spec.deny;
+    $('#sp-why').textContent = spec.why;
+    for (const btn of document.querySelectorAll('.chain button')) {
+      btn.setAttribute('aria-current', String(btn.dataset.go === S.phase));
+    }
+  }
+
+  function setPhase(phase) {
+    S.phase = phase;
+    S.size = SIZE[phase] || 'full';
+    S.phaseStart = performance.now();
+    render();
+  }
+
+  /* --------------------------------------------------------------- machine */
+  function beginListening() {
+    if (!['ready','scope','empty','error','done','result','question'].includes(S.phase)) return;
+    clearTimers();
+    S.preview = false;
+    S.visible = true; S.step = 0; S.selected = 0;
+    S.transcript = ''; S.rows = []; S.question = ''; S.opened = '';
+    S.chips = sc().chips;
+    S.scope = ['近 7 天', '6 个应用'];
+    S.holding = true;
+    S.listenStart = performance.now();
+    setPhase('listening');
+  }
+
+  function endListening() {
+    if (S.phase !== 'listening') return;
+    S.holding = false;
+    const held = performance.now() - S.listenStart;
+    if (held < 300) { setPhase('ready'); return; }
+    setPhase('transcribing');
+    later(820, () => { S.transcript = sc().say; render(); });
+    later(1260, () => {
+      setPhase('working');
+      later(1450 + Math.random() * 750, resolveOutcome);
+    });
+  }
+
+  function resolveOutcome() {
+    const scenario = sc();
+    if (S.scenario === 'clarify' && S.step === 0) { S.question = scenario.question; setPhase('question'); return; }
+    if (S.scenario === 'empty' && S.step === 0) { setPhase('empty'); return; }
+    S.rows = S.step > 0 ? (scenario.wide.length ? scenario.wide : scenario.hits) : scenario.hits;
+    if (!S.rows.length) S.rows = scenario.wide;
+    S.scope = S.step > 0 && S.scenario === 'empty' ? ['近 30 天', '6 个应用'] : ['近 7 天', '6 个应用'];
+    S.selected = 0;
+    setPhase('result');
+  }
+
+  function openSelected() {
+    if (S.phase !== 'result') return;
+    if (S.scenario === 'gone') {
+      S.opened = (S.rows[0] || {}).nm || '';
+      setPhase('error');
+      return;
+    }
+    S.opened = (S.rows[S.selected] || S.rows[0] || {}).nm || '';
+    setPhase('done');
+    later(3200, () => {
+      S.visible = false; render();
+      later(520, () => {
+        S.visible = true; S.rows = []; S.transcript = ''; S.question = '';
+        S.selected = 0; S.step = 0;
+        setPhase('ready');
+      });
+    });
+  }
+
+  function cancel() {
+    clearTimers();
+    S.holding = false;
+    S.transcript = ''; S.rows = []; S.question = ''; S.opened = ''; S.selected = 0; S.step = 0;
+    setPhase('ready');
+  }
+
+  function answer(value) {
+    S.step = 1;
+    S.chips = [{ t: value, hit: true }, { t: '近 7 天' }, { t: '6 个应用' }];
+    setPhase('working');
+    later(1350, resolveOutcome);
+  }
+
+  function widen() {
+    S.step = 1;
+    S.chips = [{ t: '华润', hit: true }, { t: '报价 方案', hit: true }, { t: '近 30 天' }, { t: '6 个应用' }];
+    setPhase('working');
+    later(1250, resolveOutcome);
+  }
+
+  /* ------------------------------------------------------------ interaction */
+  win.addEventListener('click', event => {
+    const act = event.target.closest('[data-act]');
+    const row = event.target.closest('[data-row]');
+    if (act) {
+      const a = act.dataset.act;
+      if (a === 'mic') beginListening();
+      else if (a === 'end') endListening();
+      else if (a === 'cancel') cancel();
+      else if (a === 'open') openSelected();
+      else if (a === 'scope') setPhase('scope');
+      return;
+    }
+    if (!row) return;
+    const i = Number(row.dataset.row);
+    if (S.phase === 'result') { S.selected = i; openSelected(); }
+    else if (S.phase === 'question') { answer(sc().answers[i]); }
+    else if (S.phase === 'empty') { i === 0 ? widen() : cancel(); }
+    else if (S.phase === 'error') { cancel(); }
+  });
+
+  /* hold-to-talk */
+  const talk = $('#talk');
+  const startTalk = event => { event.preventDefault(); beginListening(); };
+  talk.addEventListener('pointerdown', startTalk);
+  talk.addEventListener('pointerup', endListening);
+  talk.addEventListener('pointerleave', endListening);
+  talk.addEventListener('pointercancel', endListening);
+
+  addEventListener('keydown', event => {
+    const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName);
+    if (event.key === ' ' && !inField) {
+      event.preventDefault();
+      if (!event.repeat) beginListening();
+      return;
+    }
+    if (event.key === 'Escape') { event.preventDefault(); cancel(); return; }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (S.phase === 'result') openSelected();
+      else if (S.phase === 'empty' || S.phase === 'error') { S.phase === 'empty' ? widen() : cancel(); }
+      else if (S.phase === 'question') answer(sc().answers[0]);
+      else if (S.phase === 'ready' || S.phase === 'scope') beginListening();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (S.phase !== 'result' || S.rows.length < 2) return;
+      event.preventDefault();
+      S.selected = (S.selected + (event.key === 'ArrowDown' ? 1 : S.rows.length - 1)) % S.rows.length;
+      render();
+    }
+  });
+  addEventListener('keyup', event => { if (event.key === ' ') endListening(); });
+
+  /* auto replay the whole chain */
+  $('#btn-replay').addEventListener('click', () => {
+    cancel();
+    later(120, () => {
+      beginListening();
+      later(1750, () => { S.holding = false; endListening(); });
+    });
+  });
+
+  $('#scenario').addEventListener('change', event => {
+    S.scenario = event.target.value;
+    cancel();
+  });
+
+  /* toggles */
+  $('#btn-anno').addEventListener('click', event => {
+    const on = win.classList.toggle('anno');
+    event.currentTarget.setAttribute('aria-pressed', String(on));
+  });
+  $('#btn-dark').addEventListener('click', event => {
+    const dark = desk.dataset.panel !== 'dark';
+    desk.dataset.panel = dark ? 'dark' : 'light';
+    event.currentTarget.setAttribute('aria-pressed', String(dark));
+  });
+  $('#btn-wall').addEventListener('click', event => {
+    const dark = desk.dataset.wall !== 'dark';
+    desk.dataset.wall = dark ? 'dark' : 'light';
+    event.currentTarget.setAttribute('aria-pressed', String(dark));
+  });
+  const setRail = on => {
+    layout.dataset.rail = on ? 'on' : 'off';
+    $('#btn-rail').setAttribute('aria-pressed', String(on));
+  };
+  $('#btn-rail').addEventListener('click', () => setRail(layout.dataset.rail === 'off'));
+  $('#rail-hide').addEventListener('click', () => setRail(false));
+
+  /* chain list */
+  const chainEl = $('#chain');
+  CHAIN.forEach((phase, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<button type="button" data-go="${phase}">
+      <span class="ix">${String(i + 1).padStart(2, '0')}</span>
+      <span>${PHASE_NAMES[phase]}</span>
+      <span class="st">${phase === 'result' || phase === 'done' ? '全尺寸' : phase === 'scope' ? '分支' : phase === 'question' || phase === 'empty' || phase === 'error' ? '分支' : '收窄'}</span>
+    </button>`;
+    chainEl.appendChild(li);
+  });
+  chainEl.addEventListener('click', event => {
+    const btn = event.target.closest('[data-go]');
+    if (!btn) return;
+    preview(btn.dataset.go);
+  });
+
+  function preview(phase) {
+    clearTimers();
+    S.preview = true;
+    S.visible = true;
+    S.step = 0;
+    S.selected = 0;
+    S.rows = [];
+    S.transcript = sc().say;
+    S.chips = sc().chips;
+    S.scope = ['近 7 天', '6 个应用'];
+    S.question = sc().question || '「方案」是华润那版，还是上周那版？';
+    S.opened = (sc().hits[0] || {}).nm || '';
+    if (phase === 'ready' || phase === 'scope' || phase === 'listening') S.transcript = '';
+    if (phase === 'result') S.rows = sc().hits.length ? sc().hits : sc().wide;
+    if (phase === 'listening') { S.holding = false; S.listenStart = performance.now(); }
+    if (phase === 'done' || phase === 'error') S.opened = (sc().hits[0] || sc().wide[0] || {}).nm || '华润报价方案 v3.pptx';
+    setPhase(phase);
+  }
+
+  /* ------------------------------------------------------------- animation */
+  function frame(now) {
+    if (S.phase === 'listening') {
+      const base = S.holding
+        ? 0.44 + 0.34 * (0.5 + 0.5 * Math.sin(now / 175)) + 0.20 * (0.5 + 0.5 * Math.sin(now / 68 + 1.4))
+        : 0.34 + 0.20 * (0.5 + 0.5 * Math.sin(now / 430)) + 0.08 * (0.5 + 0.5 * Math.sin(now / 155));
+      S.level += (base - S.level) * 0.3;
+      const tmr = document.getElementById('tmr');
+      if (tmr) tmr.textContent = fmt(now - S.listenStart);
+    } else {
+      S.level += (0 - S.level) * 0.18;
+    }
+    paint(orb, ORB[S.phase] || 'rest', (now - S.phaseStart) / 1000, S.level);
+    requestAnimationFrame(frame);
+  }
+
+  setRail(true);
+  render();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

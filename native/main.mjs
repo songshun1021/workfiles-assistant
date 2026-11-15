@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { format } from 'node:util';
 import { createLineDecoder, encodeMessage, ProtocolError } from './protocol.mjs';
 import { createNativeController } from './controller.mjs';
+import { absorbOpacity, absorbTarget, clamp01, easeLeave, easeMorph, FRAME_MS, lerpBounds, LEAVE_MS, morphTarget, MORPH_MS } from './motion.mjs';
 import { FEATURE_SCHEME, FEATURE_URL, RESOURCE_TYPES, CONTENT_SECURITY_POLICY, resourceForURL, isTrustedSender, allowAudioPermission } from './security.mjs';
 
 // stdout is exclusively bounded JSON Lines, including fatal diagnostics.
@@ -42,36 +43,97 @@ function send(message) {
 function notice(code, message) { send({ v: 1, type: 'notice', code, message }); }
 // While a task is actually running, shrink the owned window so the user watches the
 // task, not the form. Background agents keep the full panel for questions/results.
-const PANEL_FULL = Object.freeze({ width: 620, height: 244 });
-const PANEL_COMPACT = Object.freeze({ width: 460, height: 118 });
-const COMPACT_PHASES = new Set(['preparing', 'transcribing', 'working']);
-function applyDensity(state) {
-  if (!window || window.isDestroyed() || !state?.visible) return;
-  const target = COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL;
-  try {
-    const [width, height] = window.getContentSize();
-    if (width === target.width && height === target.height) return;
-    const bounds = window.getBounds();
-    window.setBounds({ x: bounds.x, y: bounds.y, width: target.width, height: target.height }, true);
-  } catch { /* a resize is cosmetic; never fail a task over it */ }
+const PANEL_FULL = Object.freeze({ width: 620, height: 200 });
+const PANEL_COMPACT = Object.freeze({ width: 460, height: 124 });
+const COMPACT_PHASES = new Set(['preparing', 'listening', 'transcribing', 'working']);
+
+/* --------------------------------------------------------------- motion ----
+ * The card *is* the window: the page paints only a tint over the native material, so a
+ * size change is a real frame change. One wall-clock clock drives geometry and opacity
+ * from the same eased progress, which means they cannot disagree, a late frame skips
+ * ahead instead of stretching the motion, and an interrupted animation retargets from
+ * the live frame instead of snapping. motion.mjs owns the curve and the anchoring;
+ * this file owns the clock and the frame writes.
+ */
+let motion = null, motionBase = null;
+function stopMotion() {
+  if (motion) clearTimeout(motion.timer);
+  motion = null;
+  motionBase = null;
 }
-// Short fade so a finished panel reads as "leaving" instead of vanishing.
-function fadeOutThenDestroy(activationId) {
+// Exit is cancellable: a replacement activation re-uses the same window mid-animation and
+// must never be destroyed underneath it, so the frame it had before the animation and full
+// opacity are put back before that window is shown again. The baseline survives a motion
+// that was stopped by a guard, which is exactly the case a re-show races with.
+function cancelMotion() {
+  const base = motionBase;
+  stopMotion();
+  if (!base || !window || window.isDestroyed()) return;
+  try { window.setOpacity(1); } catch { /* a closing window needs no restore */ }
+  try { window.setBounds(base, false); } catch { /* a closing window needs no restore */ }
+}
+function animateWindow({ to, duration, ease, size = null, opacity = null, guard = null, done = null }) {
   const target = window;
-  if (exiting || !target || target.isDestroyed()) { destroyWindow(activationId); return; }
-  let step = 0;
-  const steps = 5;
-  const timer = setInterval(() => {
-    step += 1;
-    if (window !== target || target.isDestroyed()) { clearInterval(timer); return; }
-    try { target.setOpacity(Math.max(0, 1 - step / steps)); } catch { /* ignore */ }
-    if (step >= steps) {
-      clearInterval(timer);
-      try { target.setOpacity(1); } catch { /* ignore */ }
-      if (window === target) destroyWindow(activationId);
+  if (exiting || !target || target.isDestroyed() || !to) return;
+  let from;
+  try { from = target.getBounds(); } catch { return; }
+  // A retarget keeps the frame the chain started from, so a cancelled animation still has
+  // somewhere truthful to return to.
+  if (!motionBase) motionBase = from;
+  stopMotion();
+  const token = { size, timer: null };
+  motion = token;
+  const started = performance.now();
+  let painted = null;
+  const step = () => {
+    // A newer motion, a re-shown window or a closing helper all supersede this one.
+    if (motion !== token) return;
+    token.timer = null;
+    if (exiting || window !== target || target.isDestroyed() || (guard && !guard())) { motion = null; return; }
+    const elapsed = clamp01((performance.now() - started) / duration);
+    const rect = lerpBounds(from, to, ease(elapsed));
+    const alpha = opacity ? Number(opacity(elapsed).toFixed(3)) : null;
+    if (!painted || rect.x !== painted.x || rect.y !== painted.y || rect.width !== painted.width
+        || rect.height !== painted.height || alpha !== painted.alpha) {
+      try {
+        target.setBounds(rect, false);
+        if (alpha !== null) target.setOpacity(alpha);
+      } catch { /* a resize is cosmetic; never fail a task over it */ }
+      painted = { ...rect, alpha };
     }
-  }, 28);
-  timer.unref?.();
+    if (elapsed < 1) token.timer = setTimeout(step, FRAME_MS);
+    else { motion = null; motionBase = null; done?.(); }
+  };
+  token.timer = setTimeout(step, 0);
+}
+function applyDensity(state) {
+  if (!window || window.isDestroyed() || !state?.visible || !window.isVisible()) return;
+  const size = COMPACT_PHASES.has(state.phase) ? PANEL_COMPACT : PANEL_FULL;
+  // Every state update republishes the same phase; only a real density change may move
+  // the frame, and a morph already heading for this size must not be restarted.
+  if (motion?.size && motion.size.width === size.width && motion.size.height === size.height) return;
+  let bounds;
+  try { bounds = window.getBounds(); } catch { return; }
+  if (bounds.width === size.width && bounds.height === size.height) return;
+  const workArea = screen.getDisplayNearestPoint({ x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) }).workArea;
+  animateWindow({ to: morphTarget(bounds, size, workArea), duration: MORPH_MS, ease: easeMorph, size });
+}
+
+// Exit: the panel is pulled into its own orb instead of dissolving where it stood, so the
+// far side of the card travels most of its own width while the near side barely moves.
+function absorbWindow(activationId) {
+  const target = window;
+  if (exiting || !target || target.isDestroyed() || !target.isVisible()) { destroyWindow(activationId); return; }
+  let base;
+  try { base = target.getBounds(); } catch { destroyWindow(activationId); return; }
+  animateWindow({
+    to: absorbTarget(base),
+    duration: LEAVE_MS,
+    ease: easeLeave,
+    opacity: absorbOpacity,
+    guard: () => !controller?.snapshot().visible,
+    done: () => { if (window === target && !controller?.snapshot().visible) destroyWindow(activationId); },
+  });
 }
 function fatal(code, message) {
   if (exiting) return;
@@ -100,6 +162,7 @@ function publish() {
 }
 function destroyWindow(activationId) {
   clearTimeout(stopTimer); stopTimer = null;
+  stopMotion();
   const previous = window; window = null; loading = null;
   if (revealTarget?.activationId === activationId) revealTarget = null;
   if (previous && !previous.isDestroyed()) previous.destroy();
@@ -127,7 +190,7 @@ function shutdown(exitCode = 0) {
 function presentWindow(ownedWindow, activationId) {
   const state = controller.snapshot();
   if (exiting || window !== ownedWindow || ownedWindow.isDestroyed() || !state.visible || state.activationId !== activationId || revealTarget?.activationId !== activationId) return;
-  try { ownedWindow.setOpacity(1); } catch { /* ignore */ }
+  cancelMotion();
   if (revealTarget.focus) { ownedWindow.show(); ownedWindow.focus(); }
   else ownedWindow.showInactive();
   publish();
@@ -143,11 +206,18 @@ async function ensureWindow({ activationId, title, focus = true }) {
     return;
   }
   const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  const width = Math.min(620, workArea.width), height = Math.min(244, workArea.height);
+  // Open at the size this activation will actually use: a shortcut pressed to talk should
+  // never appear at full size and then shrink under the cursor.
+  const openingState = controller?.snapshot();
+  const opening = COMPACT_PHASES.has(openingState?.phase) || openingState?.capture === true ? PANEL_COMPACT : PANEL_FULL;
+  const width = Math.min(opening.width, workArea.width), height = Math.min(opening.height, workArea.height);
   const ownedWindow = new BrowserWindow({
     width, height, x: Math.round(workArea.x + (workArea.width - width) / 2), y: Math.round(workArea.y + Math.max(24, workArea.height * 0.16)),
     title, show: false, frame: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
-    alwaysOnTop: true, skipTaskbar: true, hasShadow: true, ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
+    alwaysOnTop: true, skipTaskbar: true, hasShadow: true,
+    ...(process.platform === 'darwin'
+      ? { type: 'panel', vibrancy: 'under-window', visualEffectState: 'active', roundedCorners: true, backgroundColor: '00000000' }
+      : {}),
     webPreferences: { preload: path.join(localDir, 'preload.cjs'), session: featureSession, contextIsolation: true, sandbox: true,
       nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webSecurity: true,
       allowRunningInsecureContent: false, webviewTag: false, plugins: false, devTools: false, spellcheck: false,
@@ -246,7 +316,7 @@ app.whenReady().then(async () => {
     register: (accelerator, callback) => globalShortcut.register(accelerator, () => { try { callback(); } catch (error) { reportOperationError(error); } }),
     unregister: accelerator => globalShortcut.unregister(accelerator),
     onState: publish,
-    onHide: ({ activationId }) => fadeOutThenDestroy(activationId),
+    onHide: ({ activationId, reason }) => reason === 'replacement' ? destroyWindow(activationId) : absorbWindow(activationId),
     onShow: options => { ensureWindow(options).catch(() => { if (!exiting && controller.snapshot().visible && controller.snapshot().activationId === options.activationId) fatal('PANEL_LOAD_FAILED', 'The real native voice panel could not be loaded.'); }); },
   });
   for (const method of ['ready', 'audio', 'text', 'action', 'capture']) {

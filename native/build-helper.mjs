@@ -16,7 +16,7 @@ export const APPROVED_CACHE_ROOT = path.join(os.homedir(), 'Library/Caches/DeepS
 const OWNER = 'workfiles-voice-native-v1';
 const APP_ID = 'local.workfiles.voice';
 const APP_NAME = 'Workfiles Voice Helper.app';
-const NATIVE_FILES = ['main.mjs', 'preload.cjs', 'protocol.mjs', 'security.mjs', 'controller.mjs', 'LICENSE.Electron'];
+const NATIVE_FILES = ['main.mjs', 'preload.cjs', 'protocol.mjs', 'security.mjs', 'controller.mjs', 'motion.mjs', 'LICENSE.Electron'];
 const UI_FILES = ['index.html', 'panel.js', 'panel.css', 'audio.js', 'view-state.js'];
 const FRAMEWORKS = ['Electron Framework.framework', 'Mantle.framework', 'ReactiveObjC.framework', 'Squirrel.framework'];
 const xml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');

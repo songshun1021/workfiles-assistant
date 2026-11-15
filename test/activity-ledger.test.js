@@ -211,15 +211,19 @@ test('same document does not become edit-history when mtime, title or pid change
   assert.equal([...f.store.rows.values()][0].observedAt, iso(START));
 });
 
-test('eligible document and app transitions record distinct observations, including returning to a document', async () => {
+test('eligible document and app transitions are stored separately but collapse per item when listed', async () => {
   const f = fixture(); await f.enable();
   for (const [index, value] of [snapshot('/allowed/a.docx'), snapshot('/allowed/b.docx'), snapshot('/allowed/deck.pptx', PPT), snapshot('/allowed/a.docx')].entries()) {
     f.clock(START + index);
     assert.equal((await f.ledger.ingest(value)).recorded, true);
   }
+  // Storage keeps every transition; the query view collapses a re-visited document into
+  // one row (newest first) with an observation count, so "latest N" means N distinct items.
   const result = await f.ledger.list();
-  assert.equal(result.entries.length, 4);
-  assert.deepEqual(result.entries.map(entry => entry.document.path), ['/allowed/a.docx', '/allowed/deck.pptx', '/allowed/b.docx', '/allowed/a.docx']);
+  assert.equal(result.entries.length, 3);
+  assert.deepEqual(result.entries.map(entry => entry.document.path), ['/allowed/a.docx', '/allowed/deck.pptx', '/allowed/b.docx']);
+  assert.equal(result.entries[0].observations, 2);
+  assert.equal(result.matchedCount, 4);
 });
 
 test('invalid document changes in the same app do not store private filenames', async () => {
@@ -944,4 +948,22 @@ for (const phase of ['document-validation', 'window-normalization-write']) test(
   f.clock(START + 7 * DAY); release.resolve(document());
   assert.equal(await reading, null);
   await f.ledger.purge(); assert.equal(f.store.rows.has(row.id), false);
+});
+
+test('revisiting the same page collapses into one row with a count, so "latest N" means N pages', async () => {
+  const f = fixture({ settings: { enabled: true, applications: [EDGE], contextApplications: [EDGE] } });
+  await f.enable([EDGE]);
+  await f.ledger.configure({ contextApplications: [EDGE] });
+  const page = { title: '推文 A', url: 'https://x.com/someone/status/1' };
+  const other = { title: '推文 B', url: 'https://x.com/someone/status/2' };
+  for (const [index, window] of [page, other, page, page].entries()) {
+    f.clock(START + index * 4000);
+    await f.ledger.ingest(windowSnapshot(EDGE, window));
+  }
+  const result = await f.ledger.list({ kind: 'window', limit: 20 });
+  assert.deepEqual(result.entries.map(entry => entry.window.title), ['推文 A', '推文 B']);
+  // pageA was observed twice after the baseline, pageB once.
+  assert.deepEqual(result.entries.map(entry => entry.observations), [2, 1]);
+  // Storage still keeps every stored transition; only the query view is collapsed.
+  assert.equal(f.store.rows.size, 3);
 });

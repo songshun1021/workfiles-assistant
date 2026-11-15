@@ -1,98 +1,395 @@
+/* Voice panel surface.
+ * The window itself supplies the material (macOS vibrancy behind a transparent page),
+ * so this stylesheet never paints an opaque card: it paints one tint, one specular rim
+ * and one soft inner light over that single native surface. There is exactly one
+ * surface on screen — no second layer, therefore no seam between "body" and "edge".
+ *
+ * Every colour is a theme token, a color-mix() of the ink token, or a named colour, so
+ * light/dark follow the host. All motion is disabled under prefers-reduced-motion.
+ */
+
 :root {
   color-scheme: light dark;
-  font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--dsw-alias-label-primary, CanvasText);
   background: var(--dsw-alias-bg-base, Canvas);
-  --voice-surface: var(--dsw-alias-bg-layer-1, Canvas);
+
   --voice-ink: var(--dsw-alias-label-primary, CanvasText);
   --voice-muted: var(--dsw-alias-label-secondary, GrayText);
+  --voice-surface: var(--dsw-alias-bg-layer-1, Canvas);
   --voice-border: var(--dsw-alias-border-l1, ButtonBorder);
   --voice-accent: var(--dsw-alias-state-business-primary, Highlight);
+  /* The single "blue pointer". The orb is painted from the same channels, so the panel
+     can never show two different blues, and the brand blue does not drift with a theme. */
+  --voice-pin-h: 214; --voice-pin-s: 67%; --voice-pin-l: 45%;
+  --voice-pin-dim-h: 214; --voice-pin-dim-s: 46%; --voice-pin-dim-l: 83%;
+  --voice-pin: hsl(var(--voice-pin-h) var(--voice-pin-s) var(--voice-pin-l));
   --voice-error: var(--dsw-alias-state-error-primary, CanvasText);
+  --voice-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* Density changes move the frame and the interior together: the native helper animates
+     the window with this exact --voice-ease bezier (PANEL_EASE in native/motion.mjs) for
+     --voice-morph-ms, so the glass and its content can never arrive separately. */
+  --voice-morph-ms: 320ms;
+  --voice-level: 0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --voice-pin-h: 212; --voice-pin-s: 100%; --voice-pin-l: 82%;
+    --voice-pin-dim-h: 214; --voice-pin-dim-s: 55%; --voice-pin-dim-l: 20%;
+  }
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; min-width: 280px; min-height: 0; background: var(--voice-surface); color: var(--voice-ink); }
+html, body { height: 100%; margin: 0; background: transparent; }
+body {
+  color: var(--voice-ink);
+  font-family: inherit;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
 button, input { font: inherit; }
-button { cursor: pointer; touch-action: manipulation; -webkit-app-region: no-drag; }
-button:disabled { opacity: 0.55; cursor: default; }
-button, input { border: 1px solid var(--voice-border); border-radius: 7px; }
-button { min-height: 30px; padding: 4px 9px; white-space: nowrap; background: var(--dsw-alias-bg-base, ButtonFace); color: var(--voice-ink); }
-button:hover:not(:disabled) { border-color: var(--voice-accent); }
-button:active:not(:disabled) { transform: translateY(1px); }
+button { cursor: pointer; -webkit-app-region: no-drag; }
+button:disabled { opacity: 0.38; cursor: default; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--voice-accent));
   outline-offset: 2px;
 }
 
-.voice-panel { width: 100%; padding: 12px 13px 10px; }
-.taskbar { display: flex; align-items: center; gap: 8px; min-height: 32px; }
-.voice-mark { display: grid; flex: 0 0 25px; place-items: center; color: var(--voice-muted); }
-.voice-mark svg { display: block; width: 23px; height: 23px; }
-.task-copy { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; line-height: 1.4; }
-.task-title { font-size: 11px; color: var(--voice-muted); font-weight: 500; }
-#status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.primary { border-color: var(--voice-accent); color: var(--voice-accent); }
-.quiet { background: transparent; color: var(--voice-muted); }
-.echo, .error, .detail { margin: 7px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.echo, .error { max-height: 3.1em; overflow: auto; scrollbar-width: thin; }
-.echo { font-size: 13px; }
-.error { color: var(--voice-error); font-size: 12px; }
-.detail { max-height: 2.9em; overflow: auto; font-size: 11px; color: var(--voice-muted); }
-.secondary { display: flex; align-items: center; gap: 8px; margin-top: 7px; min-height: 21px; }
-.hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--voice-muted); font-size: 11px; }
-.text-button { flex: 0 0 auto; padding: 1px 0; min-height: 21px; border: 0; border-radius: 3px; background: transparent; color: var(--voice-muted); font-size: 11px; }
-.text-button:hover:not(:disabled) { color: var(--voice-accent); text-decoration: underline; }
-#level { flex: 0 0 43px; width: 43px; height: 9px; accent-color: var(--voice-accent); }
-#progress { display: block; width: 100%; height: 4px; margin-top: 8px; accent-color: var(--voice-accent); }
-.text-form { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
-.text-form input { flex: 1 1 auto; min-width: 0; min-height: 32px; padding: 5px 8px; background: var(--dsw-alias-bg-base, Field); color: var(--voice-ink); }
+/* ---------------------------------------------------------------- surface */
+/* Fills the window exactly: this IS the panel, not a card inside it. */
+.voice-panel {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--voice-gap);
+  align-items: center;
+  padding: var(--voice-pad);
+  border-radius: 12px;
+  --voice-orb-sized: 74px;
+  --voice-gap: 14px;
+  --voice-pad: 15px 16px 14px 15px;
+  /* Density is a class, not a viewport breakpoint: while the native frame grows the page
+     must not re-flow into a different layout halfway through. */
+  transition: padding var(--voice-morph-ms) var(--voice-ease),
+    column-gap var(--voice-morph-ms) var(--voice-ease);
+  background:
+    radial-gradient(132% 62% at 50% -16%,
+      color-mix(in srgb, white 58%, transparent),
+      color-mix(in srgb, white 0%, transparent) 62%),
+    linear-gradient(162deg,
+      color-mix(in srgb, white 30%, transparent),
+      color-mix(in srgb, white 8%, transparent) 48%,
+      color-mix(in srgb, white 22%, transparent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, white 26%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 100%, transparent),
+    inset 0 0 26px -4px color-mix(in srgb, white 46%, transparent),
+    inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 34%, transparent);
+}
+/* Slow specular drift over the whole surface. */
+.voice-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(115deg,
+    color-mix(in srgb, white 0%, transparent) 28%,
+    color-mix(in srgb, white 16%, transparent) 44%,
+    color-mix(in srgb, white 0%, transparent) 58%,
+    color-mix(in srgb, white 7%, transparent) 72%,
+    color-mix(in srgb, white 0%, transparent) 84%);
+  background-size: 280% 100%;
+  animation: voice-sheen 15s linear infinite;
+}
+/* 1px specular rim: painted, never sampled, so no boundary can appear. */
+.voice-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  padding: 1px;
+  background: linear-gradient(150deg,
+    color-mix(in srgb, white 85%, transparent) 0%,
+    color-mix(in srgb, white 8%, transparent) 18%,
+    color-mix(in srgb, white 48%, transparent) 38%,
+    color-mix(in srgb, white 5%, transparent) 62%,
+    color-mix(in srgb, white 62%, transparent) 84%,
+    color-mix(in srgb, white 16%, transparent) 100%);
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+@media (prefers-color-scheme: dark) {
+  .voice-panel {
+    background:
+      radial-gradient(132% 62% at 50% -16%,
+        color-mix(in srgb, white 16%, transparent),
+        color-mix(in srgb, white 0%, transparent) 62%),
+      linear-gradient(162deg,
+        color-mix(in srgb, white 10%, transparent),
+        color-mix(in srgb, white 3%, transparent) 48%,
+        color-mix(in srgb, white 7%, transparent));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, white 14%, transparent),
+      inset 0 1px 0 color-mix(in srgb, white 32%, transparent),
+      inset 0 0 26px -6px color-mix(in srgb, white 16%, transparent),
+      inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 30%, transparent);
+  }
+  .voice-panel::after {
+    background: linear-gradient(150deg,
+      color-mix(in srgb, white 58%, transparent) 0%,
+      color-mix(in srgb, white 4%, transparent) 20%,
+      color-mix(in srgb, white 28%, transparent) 40%,
+      color-mix(in srgb, white 3%, transparent) 62%,
+      color-mix(in srgb, white 38%, transparent) 84%,
+      color-mix(in srgb, white 8%, transparent) 100%);
+  }
+}
+
+/* Listening is the one moment the orb is the subject, so it gets the room. */
+.voice-panel[data-phase="listening"] { --voice-orb-sized: 92px; }
+
+/* ------------------------------------------------------------------ orb */
+.voice-orb {
+  position: relative;
+  z-index: 1;
+  width: var(--voice-orb-sized);
+  height: var(--voice-orb-sized);
+  display: grid;
+  place-items: center;
+  /* The painter re-reads the element size every frame, so a size change is a live morph
+     of the dot field rather than a jump to a new raster. */
+  transition: width var(--voice-morph-ms) var(--voice-ease),
+    height var(--voice-morph-ms) var(--voice-ease);
+}
+.voice-orb::before {
+  content: "";
+  position: absolute;
+  inset: -16%;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--voice-pin) 22%, transparent) 0%,
+    color-mix(in srgb, var(--voice-pin) 0%, transparent) 68%);
+  opacity: var(--voice-halo, 0.55);
+  transition: opacity 0.5s var(--voice-ease);
+}
+.voice-orb canvas { position: relative; width: 100%; height: 100%; display: block; }
+
+/* -------------------------------------------------------------- content */
+.voice-content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  transition: gap var(--voice-morph-ms) var(--voice-ease);
+}
+.voice-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.voice-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+  color: var(--voice-ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 2.7em;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.voice-title.voice-error { color: var(--voice-error); }
+
+
+.voice-timer {
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--voice-ink);
+}
+
+.voice-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--voice-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 17px;
+}
+.voice-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--voice-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 2.8em;
+  overflow: auto;
+  scrollbar-width: thin;
+  transition: max-height var(--voice-morph-ms) var(--voice-ease),
+    opacity var(--voice-morph-ms) var(--voice-ease);
+}
+
+
+/* -------------------------------------------------------------- actions */
+.voice-acts { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; margin-left: auto; }
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--voice-muted);
+  transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease), transform 0.16s var(--voice-ease);
+}
+.icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--voice-ink) 9%, transparent);
+  color: var(--voice-ink);
+}
+.icon-button:active:not(:disabled) { transform: scale(0.94); }
+
+/* The only accent object in the panel: the one thing to press right now. */
+#primary {
+  width: 30px;
+  height: 30px;
+  color: var(--voice-pin);
+  background: color-mix(in srgb, var(--voice-pin) 13%, transparent);
+}
+#primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--voice-pin) 22%, transparent);
+  color: var(--voice-pin);
+}
+#primary[data-mode="busy"] { visibility: hidden; }
+
+.glyph { display: none; width: 16px; height: 16px; }
+#typing-toggle .glyph { display: block; }
+#primary:not([data-mode]) .glyph-mic, #cancel:not([data-mode]) .glyph-cancel { display: block; }
+#primary[data-mode="mic"] .glyph-mic,
+#primary[data-mode="answer"] .glyph-mic,
+#primary[data-mode="skip"] .glyph-mic { display: block; }
+#primary[data-mode="busy"] .glyph-spinner { display: block; }
+#primary[data-mode="stop"] .glyph-stop { display: block; }
+#cancel[data-mode="dismiss"] .glyph-chevron { display: block; }
+#cancel[data-mode="cancel"] .glyph-cancel { display: block; }
+
+.glyph-spinner {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 1.6px solid color-mix(in srgb, var(--voice-pin) 32%, transparent);
+  border-top-color: var(--voice-pin);
+  animation: voice-spin 0.9s linear infinite;
+}
+
+/* ------------------------------------------------------- keyboard input */
+.text-form { display: flex; align-items: center; gap: 7px; }
+.text-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--voice-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--voice-surface) 55%, transparent);
+  color: var(--voice-ink);
+}
 .text-form input::placeholder { color: var(--voice-muted); }
-.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.voice-panel[data-phase="listening"] .voice-mark,
-.voice-panel[data-phase="question"] .voice-mark { color: var(--voice-accent); }
-.voice-panel[data-phase="error"] .voice-mark { color: var(--voice-error); }
-
-@media (max-width: 350px) {
-  .voice-panel { padding: 10px; }
-  .taskbar { gap: 6px; }
-  .voice-mark { display: none; }
-  button { padding-inline: 7px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-  button:active:not(:disabled) { transform: none; }
-}
-@media (forced-colors: active) {
-  .primary, button:hover:not(:disabled) { border-color: Highlight; }
-  button:disabled { color: GrayText; opacity: 1; }
+.text-form .primary {
+  min-height: 28px;
+  padding: 3px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--voice-pin) 60%, transparent);
+  color: var(--voice-pin);
+  background: color-mix(in srgb, var(--voice-pin) 10%, transparent);
 }
 
-/* --- feedback motion: state clarity, not decoration ------------------------- */
-:root { --voice-ease: cubic-bezier(0.22, 0.61, 0.36, 1); }
-/* The mic mark pulses only while the microphone is actually capturing. */
-main[data-activity="listening"] .voice-mark { animation: voice-pulse 1.6s var(--voice-ease) infinite; color: var(--voice-accent); }
-/* Real RMS level (already computed in audio.js) shown as a short bar that settles fast. */
-#level { transition: opacity 120ms linear; }
-main[data-activity="listening"] #level { inline-size: 96px; block-size: 7px; accent-color: var(--voice-accent); }
-/* While a task runs, drop the input affordances so the eye stays on progress. */
-main[data-activity="working"] .secondary { visibility: hidden; }
-/* Busy phases get an indeterminate "working" hint next to the caption, never fake text. */
-main[data-activity="working"] #status::after { content: "…"; animation: voice-dots 1.1s steps(3, end) infinite; }
-/* Recognised or answered text fades up once, which reads as it arriving. */
-#echo:not([hidden]), #detail:not([hidden]), #error:not([hidden]) { animation: voice-rise 140ms var(--voice-ease) both; }
-/* Confirmation flash on completion, then the window fades out from main.mjs. */
-main[data-activity="done"] .taskbar { animation: voice-settle 220ms var(--voice-ease) both; }
-@keyframes voice-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.92); } }
-@keyframes voice-dots { from { opacity: 0.35; } to { opacity: 1; } }
-@keyframes voice-rise { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
-@keyframes voice-settle { from { transform: scale(0.985); } to { transform: scale(1); } }
-/* Accessibility: honour the OS setting instead of animating anyway. */
+
+#progress {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 2px;
+  border: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--voice-ink) 10%, transparent);
+}
+/* An indeterminate bar would read as a stray rule under the text; the orb already
+   shows that preparation is moving, so only a real value is ever drawn. */
+#progress:not([value]) { display: none; }
+#progress::-webkit-progress-bar { background: transparent; }
+#progress::-webkit-progress-value {
+  background: var(--voice-pin);
+  border-radius: 2px;
+  transition: width 0.2s linear;
+}
+
+/* Keyboard mode: the sentence and the field, nothing else. */
+.voice-panel.is-typing .voice-body,
+.voice-panel.is-typing .voice-subtitle { display: none; }
+
+@keyframes voice-sheen { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+@keyframes voice-spin { to { transform: rotate(360deg); } }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* The native window is pulled into the orb on exit: the frame shrinks on the helper's
+   clock, so the card keeps the size it had when the exit began and is scaled by exactly
+   the factor the viewport lost. The whole surface then shrinks into the orb instead of
+   being clipped by a closing frame, and no text re-wraps on the way in. */
+.voice-panel.is-leaving {
+  width: var(--voice-leave-w, 100%);
+  height: var(--voice-leave-h, 100%);
+  transform: scale(var(--voice-leave-scale, 1));
+  transform-origin: top left;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Compact density: the native helper shrinks the frame while a task is actually running,
+   and the page trades air for tightness on the same curve. No font-size change happens
+   here on purpose: a density change should move the air, never the type. */
+.voice-panel[data-density="compact"],
+.voice-panel[data-density="compact"][data-phase="listening"] {
+  --voice-orb-sized: 60px;
+  --voice-gap: 12px;
+  --voice-pad: 13px 15px;
+}
+.voice-panel[data-density="compact"] .voice-content { gap: 4px; }
+.voice-panel[data-density="compact"] .voice-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+/* The first state arrives after load. Without this guard the interior would self-animate
+   its own metrics on open, while the native frame is already at its final size. */
+.voice-panel.is-mounted { --voice-morph-ms: 0ms; }
+
 @media (prefers-reduced-motion: reduce) {
-  main[data-activity="listening"] .voice-mark, main[data-activity="working"] #status::after,
-  #echo:not([hidden]), #detail:not([hidden]), #error:not([hidden]), main[data-activity="done"] .taskbar { animation: none; }
-  #level { transition: none; }
+  .glyph-spinner { animation: none; }
+  .voice-panel::before { animation: none; opacity: 0; }
+  .icon-button { transition: none; }
+  .icon-button:active:not(:disabled) { transform: none; }
 }

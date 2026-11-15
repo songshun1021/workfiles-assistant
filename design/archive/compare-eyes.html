@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对比：小眼 (迭代2) vs 大卡通眼 (迭代3)</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ground: #e7e9ee;
+    --paper: #f7f8fa;
+    --paper-2: #edf0f4;
+    --ink: #151a23;
+    --ink-soft: #4a505c;
+    --muted: #7b828f;
+    --hair: rgb(21 26 35 / .12);
+    --blue: #4d6bfe;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { background: var(--ground); padding: 26px; display: grid; gap: 18px; justify-items: center; }
+
+  .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .bar strong { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
+  .bar button {
+    font: inherit; font-size: 12px; padding: 5px 13px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--hair); background: #fff; color: var(--ink-soft); transition: all 150ms var(--ease);
+  }
+  .bar button:hover { color: var(--ink); border-color: rgb(21 26 35 / .3); }
+  .bar button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  .pair { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+  .item { display: grid; gap: 8px; justify-items: center; }
+  .caption { font-size: 11.5px; color: var(--muted); letter-spacing: .02em; }
+
+  .window {
+    position: relative; width: 320px; height: 232px; border-radius: 24px; overflow: hidden;
+    background:
+      radial-gradient(130% 120% at 24% 10%, #ffffff 0%, var(--paper) 48%, var(--paper-2) 100%);
+    box-shadow: 0 1px 0 rgb(255 255 255 / .9) inset, 0 0 0 1px rgb(21 26 35 / .09), 0 22px 48px -24px rgb(20 24 35 / .40);
+    transition: transform 300ms var(--ease), opacity 300ms var(--ease), filter 300ms var(--ease);
+  }
+  /* the same dithered paper texture on both, so only the face differs */
+  .window::before {
+    content: ""; position: absolute; inset: 0; opacity: .26; pointer-events: none;
+    background-image: radial-gradient(rgb(24 29 38 / .9) 1px, transparent 1.2px);
+    background-size: 4px 4px;
+    -webkit-mask-image: radial-gradient(120% 100% at 50% 46%, transparent 24%, #000 78%);
+    mask-image: radial-gradient(120% 100% at 50% 46%, transparent 24%, #000 78%);
+  }
+  .window::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / .7), inset 0 -26px 44px -30px rgb(20 24 35 / .2);
+  }
+  .window canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .window.leaving { transform: scale(.94); opacity: 0; filter: blur(2px); }
+
+  .note { font-size: 11.5px; color: var(--muted); max-width: 60ch; text-align: center; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="bar" role="group" aria-label="同时切换两侧状态">
+  <strong>同时切换</strong>
+  <button data-state="listening" aria-pressed="true">收听</button>
+  <button data-state="thinking" aria-pressed="false">思考</button>
+  <button data-state="processing" aria-pressed="false">执行</button>
+  <button data-state="done" aria-pressed="false">完成</button>
+</div>
+
+<div class="pair">
+  <div class="item">
+    <div class="window" id="winA" data-variant="a"><canvas id="ballA" width="176" height="176" aria-label="迭代 2：小眼"></canvas></div>
+    <span class="caption">迭代 2 · 小眼（eye 1.0 · pupil 3.1 · 无高光）</span>
+  </div>
+  <div class="item">
+    <div class="window" id="winB" data-variant="b"><canvas id="ballB" width="176" height="176" aria-label="迭代 3：大卡通眼"></canvas></div>
+    <span class="caption">迭代 3 · 大卡通眼（eye 1.3 · pupil 3.9 · 带高光）</span>
+  </div>
+</div>
+
+<p class="note">两侧用同一套点阵、同一状态时钟，唯一差别是眼睛比例与瞳孔高光。键盘 1–4 也可以同时切换。</p>
+
+<script>
+  const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+  const SIZE = 176, HALF = SIZE / 2, CELL = 4, COLS = Math.ceil(SIZE / CELL);
+  const ratio = Math.min(window.devicePixelRatio || 1, 3);
+  const shared = { state: 'listening', started: performance.now(), dissolve: 0 };
+
+  function eyesFor(state, time, variant) {
+    const s = variant.eyeScale;
+    const blink = (Math.sin(time * 0.75) + 0.985) > 1.98 ? 0.18 : 1;
+    if (state === 'processing') return { eyes: [{ x: -0.28, y: 0.04, rx: 0.115 * s, ry: 0.028 * s }, { x: 0.30, y: 0.04, rx: 0.115 * s, ry: 0.028 * s }], pupils: null };
+    if (state === 'done') return { eyes: [{ x: -0.28, y: 0.06, rx: 0.115 * s, ry: 0.085 * s, smile: true }, { x: 0.30, y: 0.06, rx: 0.115 * s, ry: 0.085 * s, smile: true }], pupils: null };
+    if (state === 'thinking') {
+      return {
+        eyes: [{ x: -0.29, y: -0.015, rx: 0.105 * s, ry: 0.135 * s }, { x: 0.30, y: -0.015, rx: 0.095 * s, ry: 0.115 * s }],
+        pupils: [{ x: -0.255, y: -0.07 }, { x: 0.335, y: -0.05 }],
+      };
+    }
+    return {
+      eyes: [{ x: -0.28, y: 0.02, rx: 0.105 * s, ry: 0.135 * s * blink }, { x: 0.30, y: 0.02, rx: 0.105 * s, ry: 0.135 * s * blink }],
+      pupils: [{ x: -0.28, y: 0.02 }, { x: 0.30, y: 0.02 }],
+    };
+  }
+
+  function shade(state, nx, ny, nz, time, dissolve) {
+    const radial = Math.hypot(nx, ny);
+    if (state === 'thinking') {
+      const angle = Math.atan2(ny, nx);
+      const swirl = Math.sin(angle * 2 + radial * 9 - time * 1.4) * 0.10;
+      const lambert = Math.max(0, nx * 0.35 + ny * -0.55 + nz * 0.76);
+      return lambert * 0.86 + swirl + 0.20;
+    }
+    if (state === 'processing') {
+      const band = ((time * 0.6) % 2.6) - 0.8;
+      const scan = Math.max(0, 1 - Math.abs(nx - band) * 3.0);
+      const lambert = Math.max(0, nx * 0.05 + ny * -0.1 + nz * 0.99);
+      return lambert * 0.74 + scan * 0.3 + 0.18;
+    }
+    if (state === 'done') {
+      const fade = Math.max(0, 1 - dissolve);
+      const lambert = Math.max(0, nx * 0.28 + ny * -0.5 + nz * 0.82);
+      return (lambert * 0.72 + 0.24) * fade;
+    }
+    const lx = Math.sin(time * 0.45) * 0.55, ly = -0.62, lz = 0.62;
+    const lambert = Math.max(0, nx * lx + ny * ly + nz * lz);
+    const ripple = Math.sin(radial * 12 - time * 2.0) * 0.09;
+    return lambert * 0.98 + ripple + 0.15;
+  }
+
+  function makeBall(canvas, variant) {
+    const ctx = canvas.getContext('2d');
+    canvas.width = SIZE * ratio; canvas.height = SIZE * ratio;
+    canvas.style.width = `${SIZE}px`; canvas.style.height = `${SIZE}px`;
+
+    function draw(now) {
+      const state = shared.state;
+      const time = (now - shared.started) / 1000;
+      const dissolve = state === 'done' ? Math.min(1, Math.max(0, time - 1.0) * 0.42) : 0;
+      const face = eyesFor(state, time, variant);
+      const bob = state === 'listening' ? Math.sin(time * 1.5) * 1.6 : state === 'processing' ? Math.sin(time * 4) * 0.9 : 0;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      const key = ctx.createRadialGradient(HALF - 34, HALF - 40 + bob, 6, HALF, HALF + bob, HALF);
+      key.addColorStop(0, 'rgba(96,104,122,0.55)');
+      key.addColorStop(0.55, 'rgba(30,36,48,0.15)');
+      key.addColorStop(1, 'rgba(12,16,23,0)');
+      ctx.beginPath();
+      ctx.arc(HALF, HALF + bob, HALF - 1, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(21,26,35,0.96)';
+      ctx.fill();
+      ctx.fillStyle = key;
+      ctx.fill();
+
+      for (let gy = 0; gy < COLS; gy++) {
+        for (let gx = 0; gx < COLS; gx++) {
+          const px = gx * CELL + CELL / 2 - HALF, py = gy * CELL + CELL / 2 - HALF;
+          const radius = Math.hypot(px, py);
+          if (radius > HALF - 2) continue;
+          const nz = Math.sqrt(Math.max(0, 1 - (radius / (HALF - 1)) ** 2));
+          const value = Math.min(1, Math.max(0, shade(state, px / (HALF - 1), py / (HALF - 1), nz, time, dissolve)));
+          const on = value > BAYER4[(gy % 4) * 4 + (gx % 4)];
+          const angle = Math.atan2(py, px);
+          const rimStrength = Math.max(0, Math.cos(angle + 0.9)) ** 3;
+          const rim = radius > HALF - 16 && rimStrength > 0.18;
+          if (on && !rim) ctx.fillStyle = `rgba(247,248,250,${(0.16 + 0.24 * value).toFixed(3)})`;
+          else if (rim) ctx.fillStyle = `rgba(77,107,254,${(0.25 + 0.7 * rimStrength).toFixed(3)})`;
+          else continue;
+          ctx.globalAlpha = state === 'done' ? Math.max(0, 1 - dissolve) : 1;
+          ctx.beginPath();
+          ctx.arc(gx * CELL + CELL / 2, gy * CELL + CELL / 2 + bob, CELL * 0.42, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      const eyeAlpha = state === 'done' ? Math.max(0, 1 - dissolve * 0.9) : 1;
+      for (const eye of face.eyes) {
+        const cx = HALF + eye.x * (HALF - 1), cy = HALF + eye.y * (HALF - 1) + bob;
+        ctx.globalAlpha = eyeAlpha;
+        if (eye.smile) {
+          ctx.strokeStyle = 'rgba(247,248,250,0.95)';
+          ctx.lineWidth = 4.2 * (variant.eyeScale > 1 ? 1.1 : 1);
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(cx, cy + eye.ry * 40, eye.rx * (HALF - 1), Math.PI * 1.15, Math.PI * 1.85);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = 'rgba(247,248,250,0.97)';
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, eye.rx * (HALF - 1), Math.max(1.4, eye.ry * (HALF - 1)), 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      if (face.pupils) {
+        for (const pupil of face.pupils) {
+          const px = HALF + pupil.x * (HALF - 1), py = HALF + pupil.y * (HALF - 1) + bob;
+          ctx.fillStyle = 'rgba(21,26,35,0.94)';
+          ctx.beginPath(); ctx.arc(px, py, variant.pupil, 0, Math.PI * 2); ctx.fill();
+          if (variant.glint) {
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            ctx.beginPath(); ctx.arc(px - variant.glint * 0.9, py - variant.glint, variant.glint, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+  }
+
+  const A = { eyeScale: 1.0, pupil: 3.1, glint: 0 };
+  const B = { eyeScale: 1.3, pupil: 3.9, glint: 1.5 };
+  makeBall(document.getElementById('ballA'), A);
+  makeBall(document.getElementById('ballB'), B);
+
+  const buttons = [...document.querySelectorAll('.bar button')];
+  function setState(next) {
+    shared.state = next;
+    shared.started = performance.now();
+    for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.state === next));
+    for (const id of ['winA', 'winB']) {
+      const win = document.getElementById(id);
+      win.classList.remove('leaving');
+      if (next === 'done') setTimeout(() => win.classList.add('leaving'), 2400);
+    }
+  }
+  for (const button of buttons) button.addEventListener('click', () => setState(button.dataset.state));
+  addEventListener('keydown', event => {
+    const map = { '1': 'listening', '2': 'thinking', '3': 'processing', '4': 'done' };
+    if (map[event.key]) setState(map[event.key]);
+    if (event.key.toLowerCase() === 'r') setState('listening');
+  });
+  setState('listening');
+</script>
+</body>
+</html>

@@ -18,14 +18,14 @@ uname -m                         # 期望 arm64
 
 插件是**本地链接**安装：DSH 记录的是这个目录的路径。
 
-- 解压到稳定位置，例如 `~/Documents/DSHarness/workfiles-assistant`。
+- 解压到稳定位置，例如 `~/Developer/workfiles-assistant`。
 - **不要**放在 `~/Downloads`、`/tmp` 或任何会被清理的目录。安装后**不要移动或删除**该目录，否则插件失效。
 - 目录名建议就叫 `workfiles-assistant`（`AGENT_INSTALL.md` 与 `README.md` 都按此假设）。
 
 ```sh
-mkdir -p ~/Documents/DSHarness
-ditto -x -k <压缩包> ~/Documents/DSHarness   # 或用系统解压工具
-ls ~/Documents/DSHarness/workfiles-assistant/package.json
+mkdir -p ~/Developer
+ditto -x -k <压缩包> ~/Developer   # 或用系统解压工具
+ls ~/Developer/workfiles-assistant/package.json
 ```
 
 ## 2. 安装（交给 DSH，不要手改 profile）
@@ -48,7 +48,7 @@ ls ~/Documents/DSHarness/workfiles-assistant/package.json
 语音小窗复用本机 Electron，必须在**本机**构建；产物在 `~/Library/Caches/DeepSeekHarness/WorkfilesVoice`，不进压缩包。
 
 ```sh
-cd ~/Documents/DSHarness/workfiles-assistant
+cd ~/Developer/workfiles-assistant
 pnpm install                    # 若 install_bundle 已装好依赖可跳过
 pnpm run build:native           # 等价于 node native/build-helper.mjs --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
 ```
@@ -60,7 +60,7 @@ pnpm run build:native           # 等价于 node native/build-helper.mjs --outpu
 ## 4. 自检
 
 ```sh
-cd ~/Documents/DSHarness/workfiles-assistant
+cd ~/Developer/workfiles-assistant
 node --test test/*.test.js      # 期望：tests 624 / pass 624 / fail 0
 ```
 

@@ -49,7 +49,7 @@ export async function apply(ctx, config) {
   const native = createNativeRunner(ctx.subprocess);
   const engine = createDocumentEngine({ fs: ctx.fs, runNative: native, roots: () => readSettings().roots, enabled: () => readSettings().enabled });
   const operations = createOperations({
-    engine, getContext: session => projection.stateOf(session).context, getSettings: readSettings, getActivity: () => activityFeature?.getController(), onScopeChange: invalidateScope,
+    engine, getContext: session => projection.stateOf(session).context, getTurn: session => projection.stateOf(session).turn ?? 0, getSettings: readSettings, getActivity: () => activityFeature?.getController(), onScopeChange: invalidateScope,
     openObserved: (id, caller, expected) => {
       if (!activityFeature) throw new WorkfilesError('ACTIVITY_UNAVAILABLE', '最近资料账本暂不可用。');
       return activityFeature.openObserved(id, caller, expected);

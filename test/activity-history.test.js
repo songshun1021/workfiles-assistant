@@ -80,7 +80,7 @@ test('document history creates fresh ordinary IDs, commits through the existing 
   assert.equal(findCandidate(h.get(h.A.session).context, selected.id).id, selected.id);
   assert.equal((await h.call(h.B, 'open', { candidateId: selected.id })).code, 'UNKNOWN_CANDIDATE');
   assert.equal((await h.call(h.A, 'open', { candidateId: selected.id })).data.status, 'open_requested');
-  assert.equal(h.calls.opened.length, 1); assert.equal(contextProjection().stateVersion, 3);
+  assert.equal(h.calls.opened.length, 1); assert.equal(contextProjection().stateVersion, 4);
 });
 
 test('application-only rows never invent a file from the app name', async () => {

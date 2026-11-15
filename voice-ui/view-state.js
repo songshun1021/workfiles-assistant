@@ -56,9 +56,12 @@ export function shouldAutoDismissFeedback(state, {
 
 // Window density policy: while a task is actually running the panel shrinks so the
 // user focuses on progress instead of on the full form. Pure mapping, no DOM.
-export const PANEL_SIZES = Object.freeze({ full: Object.freeze({ width: 620, height: 244 }), compact: Object.freeze({ width: 460, height: 118 }) });
+export const PANEL_SIZES = Object.freeze({ full: Object.freeze({ width: 620, height: 200 }), compact: Object.freeze({ width: 460, height: 124 }) });
 export function panelDensity(phase) {
-  return ['preparing', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
+  // Compact for the whole stretch where the panel is doing the talking (and listening);
+  // full only when there is something to read or decide. That keeps one shrink and one
+  // grow per task instead of a window that bounces between sizes.
+  return ['preparing', 'listening', 'transcribing', 'working'].includes(phase) ? 'compact' : 'full';
 }
 // Busy phases pulse a subtle indicator; reduced-motion users still get the text state.
 export function panelActivity(phase = 'ready', captureActive = false) {
@@ -68,4 +71,11 @@ export function panelActivity(phase = 'ready', captureActive = false) {
   if (phase === 'done') return 'done';
   if (phase === 'error') return 'error';
   return 'idle';
+}
+
+// A shortcut-opened panel should not stall on a "prepare" button: when the Host says
+// preparation is possible and the gesture asked for voice, prepare once per activation.
+export function shouldAutoPrepare({ phase = 'ready', canPrepare = false, captureIntent = false, activationId = '', prepared = '' } = {}) {
+  if (!captureIntent || !canPrepare || !activationId || activationId === prepared) return false;
+  return ['ready', 'preparing', 'listening'].includes(phase);
 }

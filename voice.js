@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createVoiceRuntime } from './lib/voice-runtime.js';
 import { createVoiceCoordinator } from './lib/voice-coordinator.js';
 import { createVoiceSession, VOICE_SESSION_ID } from './lib/voice-session.js';
+import { correctTranscript as correctVoiceTranscript } from './lib/voice-correction.js';
 
 export const inject = ['workfiles', 'subprocess', 'speechController', 'agents', 'agentDefaultModel', 'sessionController', 'storageDomain', 'tools', 'systemPrompt', 'commands', 'configEditor'];
 export const Config = Schema.object({
@@ -71,7 +72,10 @@ export async function apply(ctx, config) {
       },
     });
     const controller = ctx.speechController;
+    // Optional: without an llm route the panel simply shows the raw transcript.
+    const llm = typeof ctx.get === 'function' ? ctx.get('llm') : ctx.llm;
     coordinator = createVoiceCoordinator({
+      correctTranscript: (raw, signal) => correctVoiceTranscript({ llm, raw, signal }),
       runtime: createVoiceRuntime({ subprocess: ctx.subprocess, bundleRoot, signal: lifecycle.signal }),
       speech: {
         catalog: () => controller.catalog(), follow: signal => controller.follow(signal),
