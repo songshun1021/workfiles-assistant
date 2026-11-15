@@ -967,3 +967,23 @@ test('revisiting the same page collapses into one row with a count, so "latest N
   // Storage still keeps every stored transition; only the query view is collapsed.
   assert.equal(f.store.rows.size, 3);
 });
+
+test('one clue can be forgotten by its observed id without touching the rest', async () => {
+  const f = fixture(); await f.enable([WORD]);
+  await f.ledger.ingest(snapshot('/allowed/a.docx'));
+  await f.ledger.ingest(snapshot('/allowed/b.docx'));
+  const before = await f.ledger.list();
+  assert.equal(before.entries.length, 2);
+  const target = before.entries[0].id;
+  assert.deepEqual(await f.ledger.forget(target), { removed: 1 });
+  const after = await f.ledger.list();
+  assert.equal(after.entries.length, 1);
+  assert.ok(!after.entries.some(entry => entry.id === target));
+  // Unknown and malformed ids are no-ops, never "delete by path" or a bulk erase.
+  assert.deepEqual(await f.ledger.forget(`wa-${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}`), { removed: 0 });
+  await assert.rejects(f.ledger.forget('/allowed/a.docx'), { code: 'INVALID_ACTIVITY_INPUT' });
+  assert.equal((await f.ledger.list()).entries.length, 1);
+  // Recording stays on and later observations are still recorded.
+  assert.equal(f.ledger.getSettings().enabled, true);
+  assert.equal((await f.ledger.ingest(snapshot('/allowed/c.docx'))).recorded, true);
+});

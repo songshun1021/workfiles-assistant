@@ -220,6 +220,7 @@ window.__ModuleLoader__.load({
         openRequested: '已请求系统打开保存的地址；这不代表目标窗口已打开或已登录。', openSearchPaused: '资料查找／打开已暂停；恢复后才可请求打开已保存的地址。',
         clear: '清空本地线索', clearTitle: '清空这个账本？', clearHelp: '这会删除本地已存的应用、文档、窗口线索和当前便签，不删除原文件、对话或模型服务中的已有内容；不会关闭自动记录，之后的新线索仍会记录。',
         clearConfirm: '确认清空', cancel: '取消', cleared: '本地线索已清空；不会立刻把同一条当前线索重新补回。',
+        forgetRecord: '删除这条', forgetRecordHelp: '只删除这一条本地线索；原文件、对话与其他线索不受影响。', recordForgotten: '已删除这条本地线索。',
         accessibility: '只读线索与辅助功能权限', permissionUnavailable: '读取组件暂不可用，尚不能检查辅助功能权限；没有把未知状态当作已经授权。', axMissing: '尚未允许辅助功能：仍可记录所选应用名。范围内本地文件和另行同意的窗口线索需你手动授权；勾选软件不会弹出或授予系统权限。',
         axGranted: '辅助功能已允许。所选软件可提供范围内已确认的本地文件线索；额外窗口标题和 HTTPS 地址仍只限另行勾选同意的软件。',
         axBoundary: 'macOS 的辅助功能授权本身较宽，并不是只读系统权限；本助手只做受限读取，不会借此打字、改文档或控制其它应用。打开设置不等于已授权，也不会自动开启账本。',
@@ -279,6 +280,7 @@ window.__ModuleLoader__.load({
         observedUrlHelp: 'Titles and addresses are foreground observations, not proof of editing, reading or saving. Opening only asks the OS to handle the saved HTTPS address; it does not guarantee the original window or a logged-in page, and stripped parameters may prevent a direct return.',
         openRequested: 'The OS was asked to open the saved address. This does not confirm an opened window or a signed-in page.', openSearchPaused: 'Document search / opening is paused. Resume it before requesting a saved address.',
         clear: 'Clear local clues', clearTitle: 'Clear this ledger?', clearHelp: 'Deletes saved local app, document and window clues and current cues, not original files, conversations or data already sent to a model service. Recording is not disabled; future new clues can still be recorded.', clearConfirm: 'Clear ledger', cancel: 'Cancel', cleared: 'Local clues cleared. The same current item will not immediately be backfilled.',
+        forgetRecord: 'Delete this clue', forgetRecordHelp: 'Deletes only this local clue. Original files, conversations and other clues are untouched.', recordForgotten: 'That local clue was deleted.',
         accessibility: 'Read-only clues and Accessibility', permissionUnavailable: 'The reader is unavailable, so Accessibility permission could not be checked. Unknown is not treated as granted.', axMissing: 'Accessibility is not allowed. Selected app names can still be recorded. In-scope local files and separately consented window clues need your manual grant; selecting apps neither prompts nor grants it.',
         axGranted: 'Accessibility is allowed. Selected apps may provide confirmed local file clues in allowed folders. Additional window titles and HTTPS addresses still require separate app consent.',
         axBoundary: 'The macOS Accessibility grant is broad, not a read-only OS permission. This assistant only performs limited reads, never typing, editing documents or controlling apps. Opening Settings neither grants permission nor enables the ledger.',
@@ -456,7 +458,7 @@ window.__ModuleLoader__.load({
             }, [canAct]);
             async function mutate(input, signal) {
               // Clearing is always a safe explicit revocation. Other policy writes require a confirmed status.
-              if (input.action !== 'clear' && !canWritePolicy(policyRef.current, canAct)) throw new Error(t('policyStale'));
+              if (!['clear', 'forget'].includes(input.action) && !canWritePolicy(policyRef.current, canAct)) throw new Error(t('policyStale'));
               commitPolicy({ type: 'writing' });
               // Forget disclosed rows / open acknowledgments before a revocation or clear can fail or be delayed.
               setRecords(null); setOpenRequest(null);
@@ -537,7 +539,9 @@ window.__ModuleLoader__.load({
                     records === null ? h('p', { className: 'wf-muted', role: 'status' }, operation.busy ? t('loading') : t('recordsPending')) : records.length ? h('ul', { className: 'wf-list wf-history', tabIndex: 0, 'aria-label': `${t('recent')}${appliedQuery ? ` · ${appliedQuery}` : ''}` }, records.map(entry => {
                       const openAction = observedOpenAction(entry, { canAct, busy: operation.busy || policy.stale, searchEnabled: documents?.enabled });
                       return h('li', { key: entry.id, className: 'wf-record' },
-                        h('div', { className: 'wf-record-top' }, h('span', null, entry.app?.name || entry.app?.id || t('software')), h('time', { className: 'wf-small wf-muted', dateTime: entry.observedAt }, formatObserved(entry.observedAt, t('unknownTime')))),
+                        h('div', { className: 'wf-record-top' }, h('span', null, entry.app?.name || entry.app?.id || t('software')), h('time', { className: 'wf-small wf-muted', dateTime: entry.observedAt }, formatObserved(entry.observedAt, t('unknownTime'))),
+                          h('button', { type: 'button', className: 'wf-small', 'aria-label': `${t('forgetRecord')} ${entry.app?.name || ''}`.trim(), title: t('forgetRecordHelp'), disabled: disabled,
+                            onClick: () => operation.perform(async signal => { await mutate({ action: 'forget', id: entry.id }, signal); setNotice(t('recordForgotten')); }) }, t('forgetRecord'))),
                         h('div', { className: 'wf-record-name wf-wrap' }, entry.kind === 'document' && entry.document ? entry.document.name : entry.kind === 'window' ? entry.window?.title || t('windowOnly') : t('applicationOnly')),
                         entry.kind === 'document' && entry.document ? h('div', { className: 'wf-record-path' }, entry.document.path) : null,
                         entry.kind === 'window' ? h('div', null, h('div', { className: 'wf-small wf-muted' }, t('windowClue')),
