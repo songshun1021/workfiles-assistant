@@ -478,8 +478,20 @@ test('real panel resources remain local, text-only at DOM sinks, and theme-adapt
   assert.match(html, /maxlength="2000"/);
   assert.doesNotMatch(panelSource + audioSource, /\b(?:innerHTML|outerHTML|insertAdjacentHTML|XMLHttpRequest|WebSocket|localStorage)\b|\bfetch\s*\(/);
   assert.match(panelSource, /node\.textContent = value/);
+  // A result row that opens also contains the copy control. It must not be a <button>
+  // (nesting buttons makes one click copy and open at once), and copy must not bubble.
+  assert.match(panelSource, /setAttribute\('role', 'button'\)/);
+  assert.match(panelSource, /event\.stopPropagation\(\)/);
+  assert.doesNotMatch(panelSource, /createElement\(clickable \? 'button' : 'div'\)/);
   assert.match(css, /--dsw-alias-label-primary, CanvasText/);
-  assert.match(css, /--dsw-alias-bg-base, Canvas/);
+  // The window supplies the material. A background on the page root is invisible as a
+  // colour but fatal as a material: it covers the vibrancy and the card turns into the
+  // solid white box this test used to accept.
+  const rootBlock = css.match(/^:root \{[\s\S]*?\n\}/m);
+  assert.ok(rootBlock, 'panel.css must declare :root');
+  assert.doesNotMatch(rootBlock[0], /\bbackground\s*:/);
+  assert.match(css, /html, body \{[^}]*background: transparent/);
+  assert.match(css, /prefers-reduced-transparency: reduce/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|\brgba?\s*\(/i);
 });

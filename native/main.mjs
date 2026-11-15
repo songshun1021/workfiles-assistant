@@ -45,11 +45,11 @@ function notice(code, message) { send({ v: 1, type: 'notice', code, message }); 
 // task, not the form. Background agents keep the full panel for questions/results.
 const PANEL_FULL = Object.freeze({ width: 620, height: 200 });
 const PANEL_COMPACT = Object.freeze({ width: 460, height: 124 });
-// A conversation is taller: the transcript needs room, and the overflow affordance keeps
-// the clipped edge honest instead of hiding text inside the card. Two steps, because an
-// always-tall card would be mostly empty for a two-turn exchange.
-const PANEL_TALL = Object.freeze({ width: 620, height: 352 });
-const PANEL_CONVERSATION = Object.freeze({ width: 620, height: 268 });
+// A conversation gets one fixed frame. It must not grow as turns arrive: a card that
+// resizes while you read moves the text under your eyes. The transcript keeps ~4 turns in
+// view, scrolls the newest to the bottom and announces the clipped edge, so the frame can
+// stay the size the conversation started at.
+const PANEL_THREAD = Object.freeze({ width: 620, height: 268 });
 const COMPACT_PHASES = new Set(['preparing', 'listening', 'transcribing', 'working']);
 
 /* --------------------------------------------------------------- motion ----
@@ -111,14 +111,12 @@ function animateWindow({ to, duration, ease, size = null, opacity = null, guard 
   };
   token.timer = setTimeout(step, 0);
 }
-/** How tall a conversation needs to be, estimated from what it says. The page cannot
- * measure the window for the helper, so this stays a cheap, honest approximation. */
+/** The frame a conversation uses, or null for a single result. Deliberately a constant:
+ * content length is the page's problem (it scrolls and reports the clipped edge), not a
+ * reason to resize the window under the reader. */
 function conversationSize(state) {
   const turns = Array.isArray(state?.turns) ? state.turns : [];
-  if (turns.length < 2) return null;
-  const rows = turns.reduce((total, turn) => total + (Array.isArray(turn.items) ? turn.items.length : 0), 0);
-  const lines = turns.reduce((total, turn) => total + Math.min(3, Math.ceil(Array.from(String(turn.text || '')).length / 38)), 0);
-  return lines + rows <= 6 ? PANEL_CONVERSATION : PANEL_TALL;
+  return turns.length >= 2 ? PANEL_THREAD : null;
 }
 function applyDensity(state) {
   if (!window || window.isDestroyed() || !state?.visible || !window.isVisible()) return;
@@ -232,7 +230,17 @@ async function ensureWindow({ activationId, title, focus = true }) {
     title, show: false, frame: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
     alwaysOnTop: true, skipTaskbar: true, hasShadow: true,
     ...(process.platform === 'darwin'
-      ? { type: 'panel', vibrancy: 'under-window', visualEffectState: 'active', roundedCorners: true, backgroundColor: '00000000' }
+      // `transparent` is not optional dressing: without it the alpha in backgroundColor is
+      // ignored and the window paints its default #FFF under the page, so the native
+      // vibrancy material is never visible and the card reads as a solid white box.
+      //
+      // `content` is the material that stays light in light appearance. The more
+      // background-reflective `appearance-based` looks closer to the prototype over a light
+      // wallpaper, but over a dark window it drops to ~25% luminance while the page still
+      // draws dark text (the panel follows the system appearance, not the wallpaper), so the
+      // result is unreadable. Blur and edge tint come from the material; the page adds only
+      // the cool-white tint on top of it.
+      ? { type: 'panel', transparent: true, vibrancy: 'content', visualEffectState: 'active', roundedCorners: true, backgroundColor: '#00000000' }
       : {}),
     webPreferences: { preload: path.join(localDir, 'preload.cjs'), session: featureSession, contextIsolation: true, sandbox: true,
       nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webSecurity: true,

@@ -4,6 +4,10 @@
  * and one soft inner light over that single native surface. There is exactly one
  * surface on screen — no second layer, therefore no seam between "body" and "edge".
  *
+ * Nothing here may paint the page itself. `:root` outranks the `html` rule below, so a
+ * background declared here would cover the native material with a solid rectangle and the
+ * card would read as a plain white box even though every layer below is translucent.
+ *
  * Every colour is a theme token, a color-mix() of the ink token, or a named colour, so
  * light/dark follow the host. All motion is disabled under prefers-reduced-motion.
  */
@@ -14,12 +18,17 @@
   font-size: 13px;
   line-height: 1.4;
   color: var(--dsw-alias-label-primary, CanvasText);
-  background: var(--dsw-alias-bg-base, Canvas);
 
   --voice-ink: var(--dsw-alias-label-primary, CanvasText);
   --voice-muted: var(--dsw-alias-label-secondary, GrayText);
-  --voice-surface: var(--dsw-alias-bg-layer-1, Canvas);
-  --voice-border: var(--dsw-alias-border-l1, ButtonBorder);
+  /* Secondary reading colour, hairlines and quiet fills are mixed from the ink so they
+     invert with the theme instead of sampling an opaque system colour. */
+  --voice-ink-2: color-mix(in srgb, var(--voice-ink) 78%, var(--voice-muted));
+  --voice-hair: color-mix(in srgb, var(--voice-ink) 14%, transparent);
+  /* The card's tint is a cool white, not a neutral one: the prototype reads blue at the
+     edges, and a neutral white over a warm wallpaper is what made the old card look grey. */
+  --voice-glass: color-mix(in srgb, var(--voice-pin) 6%, white);
+  --voice-fill: color-mix(in srgb, var(--voice-ink) 7%, transparent);
   --voice-accent: var(--dsw-alias-state-business-primary, Highlight);
   /* The single "blue pointer". The orb is painted from the same channels, so the panel
      can never show two different blues, and the brand blue does not drift with a theme. */
@@ -76,19 +85,22 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
      must not re-flow into a different layout halfway through. */
   transition: padding var(--voice-morph-ms) var(--voice-ease),
     column-gap var(--voice-morph-ms) var(--voice-ease);
+  /* One tint over the native material. The alphas are the prototype's (62% at the top
+     edge, 42/14/30 down the card): strong enough to carry black text over any wallpaper,
+     thin enough that the desktop still moves behind it. */
   background:
     radial-gradient(132% 62% at 50% -16%,
-      color-mix(in srgb, white 58%, transparent),
-      color-mix(in srgb, white 0%, transparent) 62%),
+      color-mix(in srgb, var(--voice-glass) 62%, transparent),
+      color-mix(in srgb, var(--voice-glass) 0%, transparent) 62%),
     linear-gradient(162deg,
-      color-mix(in srgb, white 30%, transparent),
-      color-mix(in srgb, white 8%, transparent) 48%,
-      color-mix(in srgb, white 22%, transparent));
+      color-mix(in srgb, var(--voice-glass) 42%, transparent),
+      color-mix(in srgb, var(--voice-glass) 14%, transparent) 48%,
+      color-mix(in srgb, var(--voice-glass) 30%, transparent));
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, white 26%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, white 30%, transparent),
     inset 0 1px 0 color-mix(in srgb, white 100%, transparent),
-    inset 0 0 26px -4px color-mix(in srgb, white 46%, transparent),
-    inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 34%, transparent);
+    inset 0 0 26px -4px color-mix(in srgb, white 55%, transparent),
+    inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 38%, transparent);
 }
 /* Slow specular drift over the whole surface. */
 .voice-panel::before {
@@ -100,11 +112,13 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   z-index: 0;
   background: linear-gradient(115deg,
     color-mix(in srgb, white 0%, transparent) 28%,
-    color-mix(in srgb, white 16%, transparent) 44%,
+    color-mix(in srgb, white 20%, transparent) 44%,
     color-mix(in srgb, white 0%, transparent) 58%,
-    color-mix(in srgb, white 7%, transparent) 72%,
+    color-mix(in srgb, white 9%, transparent) 72%,
     color-mix(in srgb, white 0%, transparent) 84%);
   background-size: 280% 100%;
+  mix-blend-mode: screen;
+  opacity: 0.8;
   animation: voice-sheen 15s linear infinite;
 }
 /* 1px specular rim: painted, never sampled, so no boundary can appear. */
@@ -131,27 +145,34 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   .voice-panel {
     background:
       radial-gradient(132% 62% at 50% -16%,
-        color-mix(in srgb, white 16%, transparent),
-        color-mix(in srgb, white 0%, transparent) 62%),
+        color-mix(in srgb, var(--voice-glass) 20%, transparent),
+        color-mix(in srgb, var(--voice-glass) 0%, transparent) 62%),
       linear-gradient(162deg,
-        color-mix(in srgb, white 10%, transparent),
-        color-mix(in srgb, white 3%, transparent) 48%,
-        color-mix(in srgb, white 7%, transparent));
+        color-mix(in srgb, var(--voice-glass) 14%, transparent),
+        color-mix(in srgb, var(--voice-glass) 4.5%, transparent) 48%,
+        color-mix(in srgb, var(--voice-glass) 10%, transparent));
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, white 14%, transparent),
-      inset 0 1px 0 color-mix(in srgb, white 32%, transparent),
-      inset 0 0 26px -6px color-mix(in srgb, white 16%, transparent),
-      inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 30%, transparent);
+      inset 0 0 0 1px color-mix(in srgb, white 16%, transparent),
+      inset 0 1px 0 color-mix(in srgb, white 38%, transparent),
+      inset 0 0 26px -6px color-mix(in srgb, white 18%, transparent),
+      inset 0 -26px 44px -30px color-mix(in srgb, var(--voice-pin) 32%, transparent);
   }
   .voice-panel::after {
     background: linear-gradient(150deg,
-      color-mix(in srgb, white 58%, transparent) 0%,
+      color-mix(in srgb, white 62%, transparent) 0%,
       color-mix(in srgb, white 4%, transparent) 20%,
-      color-mix(in srgb, white 28%, transparent) 40%,
+      color-mix(in srgb, white 30%, transparent) 40%,
       color-mix(in srgb, white 3%, transparent) 62%,
-      color-mix(in srgb, white 38%, transparent) 84%,
+      color-mix(in srgb, white 40%, transparent) 84%,
       color-mix(in srgb, white 8%, transparent) 100%);
   }
+}
+/* macOS "Reduce transparency" swaps the vibrancy material for an opaque one. The page is
+   normally transparent so the material can show; here it must supply a base instead, or
+   black text would sit on bare wallpaper with no contrast guarantee. */
+@media (prefers-reduced-transparency: reduce) {
+  :root { background: Canvas; }
+  .voice-panel { background: color-mix(in srgb, Canvas 88%, transparent); }
 }
 
 /* Listening is the one moment the orb is the subject, so it gets the room. */
@@ -265,7 +286,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
    same width, so a column of rows lines up. */
 .voice-item-type {
   flex: 0 0 auto;
-  min-width: 26px;
+  min-width: 30px;
   padding: 1px 4px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--voice-ink) 9%, transparent);
@@ -288,8 +309,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   border-radius: 5px;
   background: transparent;
   color: var(--voice-muted);
-  transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease);
+  opacity: 0.5;
+  transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease), opacity 0.16s var(--voice-ease);
 }
+.voice-item:hover .voice-item-copy,
+.voice-item:focus-within .voice-item-copy,
+.voice-item-copy:focus-visible { opacity: 1; }
 .voice-item-copy svg { width: 13px; height: 13px; }
 .voice-item-copy:hover:not(:disabled) {
   background: color-mix(in srgb, var(--voice-ink) 9%, transparent);
@@ -300,6 +325,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .voice-item-name {
   flex: 0 1 auto;
   min-width: 0;
+  font-size: 12.5px;
   color: var(--voice-ink);
   font-weight: 500;
   overflow: hidden;
@@ -309,6 +335,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .voice-item-meta {
   flex: 0 1 auto;
   margin-left: auto;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -318,19 +345,48 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 /* ------------------------------------------------------------ transcript */
 /* A conversation takes over the card: the transcript scrolls, the live line stays under
-   it, and anything out of view is announced by the pill in the action row. */
-.voice-thread { display: none; min-height: 0; overflow: hidden auto; align-content: start; gap: 9px; padding: 2px 4px 4px 1px; scrollbar-width: thin; }
+   it, and anything out of view is announced by the pill in the action row.
+   The transcript is the only flexible row, so the live line and the actions sit on the
+   bottom edge like the prototype's composer instead of floating under short text. */
+.voice-thread {
+  display: none;
+  min-height: 0;
+  overflow: hidden auto;
+  align-content: start;
+  gap: 12px;
+  padding: 4px 2px 10px 1px;
+}
+/* The scroll indicator: a 3px thumb on the right edge. Deliberately styled with the
+   ::-webkit-scrollbar pseudo-elements instead of `scrollbar-width`: the standard property
+   would give macOS an overlay scrollbar that is invisible until you scroll, and a clipped
+   edge you cannot see is the thing this panel is trying to stop doing. */
+.voice-thread::-webkit-scrollbar { width: 3px; }
+.voice-thread::-webkit-scrollbar-track { background: transparent; }
+.voice-thread::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--voice-ink) 22%, transparent);
+}
 .voice-panel.is-thread { align-items: stretch; --voice-orb-sized: 46px; }
 .voice-panel.is-thread .voice-thread { display: grid; }
-.voice-panel.is-thread .voice-content { align-content: start; min-height: 0; }
+.voice-panel.is-thread .voice-content {
+  align-content: stretch;
+  /* transcript | status | live line + actions. The status belongs above the composer: it
+     is what the microphone is doing, and it must not end up under the buttons. */
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  min-height: 0;
+}
+.voice-panel.is-thread .voice-content > #status { grid-row: 2; }
+.voice-panel.is-thread .voice-content > .voice-line { grid-row: 3; }
 .voice-panel.is-thread.is-settled .voice-title { display: none; }
 
 .voice-turn { display: grid; gap: 5px; min-width: 0; }
 .voice-turn.is-user { display: flex; gap: 8px; align-items: baseline; }
+/* History is still readable, but the newest turn is the one that owns the card. */
+.voice-turn.is-older { opacity: 0.62; }
 .voice-turn-who { flex: 0 0 auto; font-size: 10.5px; color: var(--voice-muted); }
-.voice-turn-say { font-size: 13px; line-height: 1.45; color: var(--voice-ink-2); overflow-wrap: anywhere; white-space: pre-wrap; }
-.voice-turn.is-assistant .voice-turn-say { font-size: 13.5px; color: var(--voice-ink); }
-.voice-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
+.voice-turn-say { font-size: 13.5px; line-height: 1.45; color: var(--voice-ink-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.voice-turn.is-assistant .voice-turn-say { font-size: 14px; color: var(--voice-ink); }
+.voice-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 
 /* Clipped edges fade; the pill states it and scrolls there. */
 .voice-thread[data-fade="top"] { mask: linear-gradient(transparent, black 16px); -webkit-mask: linear-gradient(transparent, black 16px); }
@@ -338,9 +394,10 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .voice-thread[data-fade="both"] { mask: linear-gradient(transparent, black 16px, black calc(100% - 18px), transparent); -webkit-mask: linear-gradient(transparent, black 16px, black calc(100% - 18px), transparent); }
 
 .voice-more {
-  display: flex; align-items: center; gap: 3px;
-  padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--voice-ink) 16%, transparent); border-radius: 999px;
-  background: transparent; color: var(--voice-muted); font-size: 10.5px; font-variant-numeric: tabular-nums;
+  display: flex; align-items: center; gap: 4px;
+  margin-right: 2px;
+  padding: 3px 8px 3px 9px; border: 1px solid var(--voice-hair); border-radius: 999px;
+  background: transparent; color: var(--voice-ink-2); font-size: 11px; font-variant-numeric: tabular-nums;
   transition: background 0.16s var(--voice-ease), color 0.16s var(--voice-ease);
 }
 .voice-more[hidden] { display: none; }
@@ -408,9 +465,9 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   min-width: 0;
   min-height: 28px;
   padding: 4px 9px;
-  border: 1px solid color-mix(in srgb, var(--voice-border) 70%, transparent);
+  border: 1px solid var(--voice-hair);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--voice-surface) 55%, transparent);
+  background: var(--voice-fill);
   color: var(--voice-ink);
 }
 .text-form input::placeholder { color: var(--voice-muted); }
@@ -460,8 +517,10 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 /* A row that can be opened says so on hover; the send is an index, never a path. */
 .voice-item.is-clickable { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; padding: 3px 4px; border-radius: 7px; transition: background 0.16s var(--voice-ease); }
 .voice-item.is-clickable:hover { background: color-mix(in srgb, var(--voice-ink) 7%, transparent); }
-.voice-item.is-clickable:disabled { cursor: default; opacity: 0.55; }
-.voice-item.is-clickable[data-pending="1"] .voice-item-name { opacity: 0.6; }
+.voice-item.is-clickable[data-pending="1"] { cursor: default; }
+/* The row is a div with role="button" (it contains the copy button), so it draws its own
+   focus ring and keeps a visible disabled state instead of relying on :disabled. */
+.voice-item.is-clickable[aria-disabled="true"] { opacity: 0.6; }
 
 /* The native window is pulled into the orb on exit: the frame shrinks on the helper's
    clock, so the card keeps the size it had when the exit began and is scaled by exactly

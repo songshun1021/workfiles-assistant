@@ -314,6 +314,30 @@ test('main source retains strict sandbox, lazy real page, no proactive mic/AX/di
   for (const forbidden of ['unregisterAll(', 'askForMediaAccess(', 'isTrustedAccessibilityClient(', 'desktopCapturer', 'executeJavaScript(', 'http://', 'https://', 'shell.open', 'createServer(']) assert.equal(source.includes(forbidden), false, forbidden);
 });
 
+test('the panel window is transparent, so the native material is what the user sees', async () => {
+  const source = await fs.readFile(path.join(root, 'native/main.mjs'), 'utf8');
+  // `backgroundColor` alpha is ignored without `transparent`; the window then paints its
+  // default #FFF under the page and the vibrancy is never visible. This exact pair is the
+  // difference between a frosted card and a white rectangle, so it is asserted, not assumed.
+  assert.match(source, /transparent: true/);
+  assert.match(source, /backgroundColor: '#00000000'/);
+  const material = source.match(/vibrancy: '([a-z-]+)'/);
+  assert.ok(material, 'a vibrancy material must be chosen');
+  // Every one of these stays light in light appearance. The background-reflective
+  // `appearance-based`/`light` materials look closer to the design over a pale wallpaper,
+  // but over a dark window they drop to a dark card while the page still draws dark text,
+  // because the panel follows the system appearance rather than the wallpaper.
+  assert.ok(['content', 'sidebar', 'under-window', 'header', 'sheet', 'window'].includes(material[1]), material[1]);
+});
+
+test('a conversation keeps one frame instead of growing with its text', async () => {
+  const source = await fs.readFile(path.join(root, 'native/main.mjs'), 'utf8');
+  // Content length is the page's problem (it scrolls and reports the clipped edge); the
+  // window must not resize under the reader as turns arrive.
+  assert.match(source, /turns\.length >= 2 \? PANEL_THREAD : null/);
+  assert.doesNotMatch(source, /PANEL_TALL/);
+});
+
 test('builder output root is only the project native directory or exact user-approved cache', () => {
   assert.equal(APPROVED_CACHE_ROOT, path.join(os.homedir(), 'Library/Caches/DeepSeekHarness/WorkfilesVoice'));
   assert.equal(resolveBuildOutputRoot(root), path.join(root, '.native'));

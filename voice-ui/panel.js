@@ -316,13 +316,23 @@ const FAILED_GLYPH = ['M7 7l10 10', 'M17 7L7 17'];
 // supports it — a button that copies the exact path or saved link the Host supplied.
 function rowNode(row, index = null) {
   const clickable = index !== null && index >= 0 && canSelect;
-  const item = document.createElement(clickable ? 'button' : 'div');
+  // Deliberately not a <button>: the row also holds the copy control, and a button may not
+  // contain another button. A click on copy would bubble into the row and open the document
+  // as well as copy it, which is exactly the double action this panel must never perform.
+  const item = document.createElement('div');
   item.className = clickable ? 'voice-item is-clickable' : 'voice-item';
   if (clickable) {
-    item.type = 'button';
     item.dataset.index = String(index);
+    item.tabIndex = 0;
+    item.setAttribute('role', 'button');
+    item.setAttribute('aria-label', `打开：${row.name}`);
     item.title = '打开这一条';
     item.addEventListener('click', () => requestRow(index, item));
+    item.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      requestRow(index, item);
+    });
   }
   if (row.type) { const chip = document.createElement('span'); chip.className = 'voice-item-type'; chip.textContent = row.type; item.append(chip); }
   const name = document.createElement('span'); name.className = 'voice-item-name'; name.textContent = row.name;
@@ -337,16 +347,14 @@ function rowNode(row, index = null) {
  * resolve it through the ordinary candidate gate. */
 function requestRow(index, node) {
   if (!canSelect || !host.activationId) return;
-  node.disabled = true;
+  if (node.dataset.pending === '1') return;
   node.dataset.pending = '1';
+  node.setAttribute('aria-disabled', 'true');
+  const settle = () => { delete node.dataset.pending; node.removeAttribute('aria-disabled'); };
   try {
-    Promise.resolve(bridge.select({ activationId: host.activationId, index })).catch(() => {
-      node.disabled = false;
-      delete node.dataset.pending;
-    });
+    Promise.resolve(bridge.select({ activationId: host.activationId, index })).catch(settle);
   } catch {
-    node.disabled = false;
-    delete node.dataset.pending;
+    settle();
   }
 }
 
@@ -383,7 +391,9 @@ function renderThread() {
     const lastAssistant = turns.map(turn => turn.role).lastIndexOf('assistant');
     ui.thread.replaceChildren(...turns.map((turn, turnIndex) => {
       const node = document.createElement('div');
-      node.className = `voice-turn is-${turn.role}`;
+      // The newest turn is the one that owns the card; earlier ones stay readable but
+      // recede, so a glance lands on the answer rather than on the history above it.
+      node.className = `voice-turn is-${turn.role}${turnIndex === turns.length - 1 ? '' : ' is-older'}`;
       if (turn.role === 'user') {
         const who = document.createElement('span'); who.className = 'voice-turn-who'; who.textContent = '你';
         const say = document.createElement('span'); say.className = 'voice-turn-say'; say.textContent = turn.text;
@@ -440,7 +450,9 @@ function copyButton(row) {
   button.title = label;
   const draw = (paths, fill) => button.replaceChildren(glyph(paths, { fill }));
   draw(COPY_GLYPH);
-  button.addEventListener('click', async () => {
+  button.addEventListener('click', async event => {
+    // A copy must never also be a click on the row it sits in.
+    event.stopPropagation();
     if (button.disabled) return;
     button.disabled = true;
     const finish = (paths, state, message, delay) => {
