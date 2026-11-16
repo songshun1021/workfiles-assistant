@@ -42,6 +42,11 @@ const FILES = [
   'OPEN_SOURCE.md',
   'THIRD_PARTY_NOTICES.md',
   'LICENSE',
+  'screenshots.json',
+  'assets/icon-180.png',
+  'design/panel-stages.png',
+  'design/glass-compare.png',
+  'design/promo/poster.png',
 ];
 const DIRECTORIES = ['lib', 'native', 'voice-ui', 'locale', 'node_modules'];
 
