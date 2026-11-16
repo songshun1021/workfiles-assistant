@@ -1,4 +1,4 @@
-# Agent 安装手册 · 工作资料助手 0.5.1-beta.1
+# Agent 安装手册 · 工作资料助手 0.9.0
 
 > 面向接收方 Agent（Codex / DeepSeek Harness 等）。请**按顺序执行并在每一步后核对输出**；不确定时停下来问人类，不要猜。
 > 人类用户请看 `README.md` 的「内测安装」。
@@ -39,7 +39,7 @@ ls ~/Developer/workfiles-assistant/package.json
 
 安装后用 `list_bundles` 核对：
 
-- 存在 `@local/deepseek-workfiles`，`version` 为 `0.5.1`，`installed: true`，`enabled: true`
+- 存在 `@local/deepseek-workfiles`，`version` 为 `0.9.0`，`installed: true`，`enabled: true`
 - `rows` 应为两行：`local-workfiles-assistant`、`local-workfiles-voice`
 - 结果里不应出现 incompatible-version 错误
 
@@ -47,11 +47,15 @@ ls ~/Developer/workfiles-assistant/package.json
 
 语音小窗复用本机 Electron，必须在**本机**构建；产物在 `~/Library/Caches/DeepSeekHarness/WorkfilesVoice`，不进压缩包。
 
+朋友版压缩包已内置 `node_modules`，不需要 `pnpm install`；直接双击目录里的 `1-构建语音组件.command`，或：
+
 ```sh
 cd ~/Developer/workfiles-assistant
-pnpm install                    # 若 install_bundle 已装好依赖可跳过
-pnpm run build:native           # 等价于 node native/build-helper.mjs --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
+ELECTRON_RUN_AS_NODE=1 "/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" \
+  native/build-helper.mjs --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
 ```
+
+从源码目录安装时改用 `pnpm install` 后 `pnpm run build:native`，效果相同。
 
 - 构建会从 `/Applications/DeepSeek Harness.app` 复制约 300 MB Electron 运行时并做 ad-hoc 签名，需要时间与磁盘。
 - **不会**启动 GUI、不会打开麦克风。若构建报「宿主版本已改变」，说明宿主不是 0.2.2-rc.3 → 回到第 0 步。

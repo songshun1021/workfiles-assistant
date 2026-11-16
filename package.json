@@ -39,7 +39,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "for file in index.js client.js voice.js lib/*.js native/*.js native/*.mjs native/*.cjs voice-ui/*.js; do node --check \"$file\" || exit 1; done",
-    "build:native": "node native/build-helper.mjs --output-root \"$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice\""
+    "build:native": "node native/build-helper.mjs --output-root \"$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice\"",
+    "package:friend": "node scripts/package-friend.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0"

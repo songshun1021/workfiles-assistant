@@ -19,3 +19,6 @@ Icon?
 # Development baselines and review diffs kept as local references only.
 .*-baseline-*/
 *.diff
+
+# Friend-facing build output of scripts/package-friend.mjs.
+dist/

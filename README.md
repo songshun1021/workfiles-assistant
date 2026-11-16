@@ -4,14 +4,17 @@ DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处�
 
 ## 内测安装（朋友版）
 
-当前固定版本 **0.5.1**，目标宿主 **DSH 0.2.2-rc.3 / macOS arm64**。这是本地链接安装的插件，不做通用分发包。
+当前版本 **0.9.0**，目标宿主 **DSH 0.2.2-rc.3 / macOS arm64**。这是本地链接安装的插件：DSH 记录目录的绝对路径，装好后**不要移动或删除**该目录。
 
-1. 把本仓库克隆到本地固定位置，**不要移动**：`git clone <repo> ~/Developer/workfiles-assistant`。
-2. 安装依赖：在该目录执行 `pnpm install`。
-3. 构建桌面语音组件（每台机器各自构建，产物在本机缓存里，不进仓库）：
-   `pnpm run build:native`；随后可用 `node --test test/*.test.js` 自检。
-4. 用 DSH 的插件管理器安装/启用该目录（本地 link 方式），刷新页面后侧栏底部出现「资料助手」。
-5. 首次使用：全局快捷键 **⌘⇧Space** → 说话。若未准备本地识别模型，按提示手动准备后再录音；系统麦克风与辅助功能权限都由你本人在系统设置里授予。
+**发给朋友的压缩包**用 `npm run package:friend`（`scripts/package-friend.mjs`）生成：自带依赖，解压后是 `workfiles-assistant/`，不需要 pnpm 或联网装依赖。朋友按目录里的 `安装说明.md` 操作即可，三步：
+
+1. 把整个 `workfiles-assistant` 文件夹放到固定位置（例如 `~/Developer/workfiles-assistant`），不要放在下载文件夹。
+2. 双击 `1-构建语音组件.command` 构建桌面语音组件（每台机器各做一次；复用本机 `DeepSeek Harness.app` 的 Electron，产物在 `~/Library/Caches/DeepSeekHarness/WorkfilesVoice`，不进包）。
+3. 在 DSH 插件页「添加插件」选择该目录，启用后完全退出并重新打开 DSH；刷新后侧栏底部出现「资料助手」。首次使用在面板里添加自己的资料文件夹、由本人授权辅助功能；**⌘⇧Space** 唤起语音，按提示准备本地识别模型并允许麦克风。
+
+语音功能依赖 DSH 自带的语音识别（`@deepseek-ai/dsh-experimental-voice-input-bundle`，本机 SenseVoice）；宿主没装时先在插件页装上。
+
+从源码目录安装时，先 `pnpm install` 再 `pnpm run build:native`，详见 `AGENT_INSTALL.md`。
 
 已知限制（内测）：只在 macOS arm64 + DSH 0.2.2-rc.3 上验证；未接飞书/腾讯/MCP 连接器；不做 OCR/截屏；不同应用暴露的 Accessibility 元数据差异很大，取不到时只保留应用级线索。详见 [能力评估](<./MACOS_CAPABILITIES.md>) 与 [验收记录](<./VERIFICATION.md>)。
 
