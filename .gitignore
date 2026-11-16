@@ -22,3 +22,6 @@ Icon?
 
 # Friend-facing build output of scripts/package-friend.mjs.
 dist/
+
+# Promo video lives in GitHub Release assets, not in git history.
+design/promo/*.mp4

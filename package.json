@@ -34,7 +34,12 @@
     "VOICE_PROTOCOL.md",
     "OPEN_SOURCE.md",
     "THIRD_PARTY_NOTICES.md",
-    "LICENSE"
+    "LICENSE",
+    "assets",
+    "screenshots.json",
+    "design/panel-stages.png",
+    "design/glass-compare.png",
+    "design/promo/poster.png"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
@@ -67,5 +72,21 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/songshun1021/workfiles-assistant.git"
+  },
+  "homepage": "https://github.com/songshun1021/workfiles-assistant#readme",
+  "bugs": {
+    "url": "https://github.com/songshun1021/workfiles-assistant/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "macos",
+    "voice",
+    "accessibility",
+    "document-search"
+  ]
 }

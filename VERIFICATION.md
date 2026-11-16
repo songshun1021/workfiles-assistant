@@ -50,7 +50,7 @@
 
 | 位置 | 问题 | 处理 |
 | --- | --- | --- |
-| `native/build-helper.mjs` | 缓存根写死 `/Users/sean/Library/Caches/...`，换用户直接报「未批准的输出目录」 | 改为 `os.homedir()` 派生；批准校验仍要求精确等于该 owned 目录 |
+| `native/build-helper.mjs` | 缓存根写死 `/Users/<user>/Library/Caches/...`，换用户直接报「未批准的输出目录」 | 改为 `os.homedir()` 派生；批准校验仍要求精确等于该 owned 目录 |
 | `test/create_test_presentations.py` | 守卫写死开发机工作区，换目录即拒绝生成夹具 | 改为从 `__file__` 推导项目根，仍要求输出落在本项目内 |
 | `test/documents.test.js` | python3 路径写死某个 `dsh-runtimes` 目录 | 改为在 `~/.dsh/dsh-runtimes/*/dependencies/python/bin/python3` 里查找；找不到则 `t.skip` 而不是失败 |
 | `test/voice-native.test.js` | 断言写死缓存根 | 同步改为 homedir 派生断言 |

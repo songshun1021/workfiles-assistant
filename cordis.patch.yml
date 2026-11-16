@@ -2,10 +2,6 @@
     - id: local-workfiles-assistant
       name: '@local/deepseek-workfiles'
       config:
-        roots:
-          - /Users/sean/Desktop
-          - /Users/sean/Documents
-          - /Users/sean/Downloads
         enabled: true
     - id: local-workfiles-voice
       name: '@local/deepseek-workfiles/voice'

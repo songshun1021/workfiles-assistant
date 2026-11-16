@@ -345,7 +345,7 @@ test('builder output root is only the project native directory or exact user-app
   assert.equal(resolveBuildOutputRoot(root), path.join(root, '.native'));
   assert.equal(resolveBuildOutputRoot(root, '.native'), path.join(root, '.native'));
   assert.equal(resolveBuildOutputRoot(root, APPROVED_CACHE_ROOT), APPROVED_CACHE_ROOT);
-  for (const value of ['/tmp', '/Users/sean/Library/Caches', path.dirname(APPROVED_CACHE_ROOT), `${APPROVED_CACHE_ROOT}-evil`, `${APPROVED_CACHE_ROOT}/extra`, path.join(root, '.native-evil'), '', null, 1]) assert.throws(() => resolveBuildOutputRoot(root, value));
+  for (const value of ['/tmp', '/Users/other/Library/Caches', path.dirname(APPROVED_CACHE_ROOT), `${APPROVED_CACHE_ROOT}-evil`, `${APPROVED_CACHE_ROOT}/extra`, path.join(root, '.native-evil'), '', null, 1]) assert.throws(() => resolveBuildOutputRoot(root, value));
 });
 
 test('builder CLI accepts both scoped options in either order and rejects unknown/duplicate/missing flags', () => {

@@ -11,11 +11,11 @@ Run from a **real plugin package copy**, after `native/` and the five required r
 `voice-ui/` resources have been included in that package:
 
 ```sh
-# This exact non-FileProvider cache was explicitly approved by the user:
-node native/build-helper.mjs --output-root '/Users/sean/Library/Caches/DeepSeekHarness/WorkfilesVoice'
-# Default remains the package's own .native (fails on this FileProvider volume).
+# Build into the fixed per-user cache (the default output is the package .native/, which some FileProvider volumes reject):
+node native/build-helper.mjs --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
+# Default remains the package's own .native, which fails on FileProvider volumes.
 # Optional verified installed runtime override, combinable with --output-root:
-node native/build-helper.mjs --source-executable '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness' --output-root '/Users/sean/Library/Caches/DeepSeekHarness/WorkfilesVoice'
+node native/build-helper.mjs --source-executable '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness' --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
 ```
 
 The builder also works under the installed Electron's Node mode. It does not run
@@ -23,8 +23,8 @@ Electron's GUI/main feature, register a key, display a page, ask for permissions
 or open a microphone during the build. It verifies the source as an installed
 Harness Electron runtime and refuses incompatible fuses instead of changing them.
 
-Output is confined to the package's own `.native/` or the one exact user-approved
-cache `/Users/sean/Library/Caches/DeepSeekHarness/WorkfilesVoice`. Other paths,
+Output is confined to the package's own `.native/` or the exact per-user cache
+`$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice`. Other paths,
 namespace/cache-root symlinks, unknown owners and non-empty unowned output roots
 are rejected. No fallback directory is selected silently.
 
@@ -54,16 +54,16 @@ wrappers and the new top-level app are ad-hoc signed, separately, **without
 `--deep`**. Source app files and signatures are never modified. No new Electron
 package is downloaded or installed.
 
-On this machine, Documents is FileProvider-managed. It synthesizes empty
-`com.apple.FinderInfo` on new `.app` / `.framework` directories even under a
+A FileProvider-managed location (iCloud Drive Documents, for example) synthesizes
+empty `com.apple.FinderInfo` on new `.app` / `.framework` directories even under a
 `.nosync` ancestor; native code signing rejects this metadata. The builder only
 clears FinderInfo/ResourceFork on individually verified owned real output paths,
 never follows a link or clears quarantine/provenance/FileProvider/security flags.
-The user explicitly approved only the exact WorkfilesVoice cache above to recover
-from this boundary. The cache build has now passed owned app/helper signing,
-all four copied vendor framework signature checks, source signature/hash checks
-and the copied executable's Node-mode probe. Do not launch unsigned workspace
-experiments or generalize this approval to other Library/Caches/temporary paths.
+The exact WorkfilesVoice cache above is the only supported recovery from this
+boundary. The cache build passes owned app/helper signing, all four copied vendor
+framework signature checks, source signature/hash checks and the copied
+executable's Node-mode probe. Do not launch unsigned workspace experiments or
+generalize the cache location to other Library/Caches/temporary paths.
 Build failure is not a reason to bypass signing, change OS settings, grant
 permissions, accept the Xcode license, or re-sign the source app.
 
@@ -150,7 +150,7 @@ explicit user actions; programmatic inspection must use capture:false.
 
 ## Verified versions / licensing / boundaries
 
-Read-only source probe on this installation: Harness **0.2.2-rc.2**, Electron
+Read-only source probe on the verified installation: Harness **0.2.2-rc.3**, Electron
 **44.7.0**, Chromium **152.0.7977.130**, Node **24.21.0**, **arm64**. The Electron
 v1 fuse wire was `101100011`: `embeddedAsarIntegrityValidation` and
 `onlyLoadAppFromAsar` are disabled, so a separate owned `Resources/app` entry is
@@ -169,17 +169,14 @@ References:
 - https://github.com/electron/electron/blob/v44.7.0/build/fuses/fuses.json5
 - https://github.com/electron/electron/blob/v44.7.0/LICENSE
 
-Validated cache build: `1a75261979d664aed3f987fe`, containing 298,985,427 framework
-bytes in 243 framework files. The completed build directory measured 299,945,979
-logical bytes, 278 files and 14 validated internal relative links before GUI use.
-The previous `6ac389544aafa862d5d81f91` cache was confirmed fully stopped and
-unreferenced, ownership/link-checked and removed; only this new cache build remains. `codeSignVerify`, `copiedFrameworkSignatures`,
+Validated cache build: `4eb46b2e9486f1e671b7a7e3`, containing 298,985,427 framework
+bytes in 243 framework files. The completed build directory contains 243 framework files and 14 validated
+internal relative links before GUI use. `codeSignVerify`, `copiedFrameworkSignatures`,
 `sourceSignaturesAfterBuild` and `copiedRuntimeNodeMode` are true;
-`guiLaunched` and `microphoneOpened` are false. The frozen product panel,
-view-state and audio hashes match the UI teammate's final resources.
+`guiLaunched` and `microphoneOpened` are false. The frozen panel, view-state and
+audio hashes match the shipped resources.
 
-Pure tests: `node --test test/voice-native.test.js` (28 tests at implementation
-handoff). These exercise parsers, bounded framing, lifecycle/key policy, stale and
+Pure tests: `node --test test/voice-native.test.js`. These exercise parsers, bounded framing, lifecycle/key policy, stale and
 late submissions, permission gates, exact sender/resource restrictions, preload
 surface and build safety. They do **not** prove real OS key delivery, multi-display
 focus, native page rendering, mic/TCC behavior, audio input, local TTS playback,

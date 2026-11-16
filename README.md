@@ -1,22 +1,71 @@
-# 工作资料助手 · macOS 本地 7 天应用与窗口线索
+# 工作资料助手 · Workfiles Assistant
 
-DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处理；只有歧义才追问。** 保留原有范围检索、接着纠正和安全打开。0.4.0 将 Office 三款建议扩展为用户可选的更多应用，并对另行同意的应用读取有限 Accessibility 窗口元数据；不是全盘监控或录屏记忆。
+[![macOS arm64](https://img.shields.io/badge/platform-macOS%20arm64-black)](#安装)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.2--rc.3-blue)](#安装)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-## 内测安装（朋友版）
+**在 macOS 上，用一句话找回你看过的资料。** 给 DeepSeek Harness 的本地插件：按下 **⌘⇧Space** 说一句「早上那份复盘 PPT」，它在你授权的文件夹和最近 7 天的窗口线索里找到它，直接打开——不用先想起文件名。
 
-当前版本 **0.9.0**，目标宿主 **DSH 0.2.2-rc.3 / macOS arm64**。这是本地链接安装的插件：DSH 记录目录的绝对路径，装好后**不要移动或删除**该目录。
+![一张卡片走完整个语音流程](design/panel-stages.png)
 
-**发给朋友的压缩包**用 `npm run package:friend`（`scripts/package-friend.mjs`）生成：自带依赖，解压后是 `workfiles-assistant/`，不需要 pnpm 或联网装依赖。朋友按目录里的 `安装说明.md` 操作即可，三步：
+[22 秒宣传片（MP4）](https://github.com/songshun1021/workfiles-assistant/releases/download/v0.9.0/workfiles-assistant-promo-22s.mp4) · [可交互设计稿（HTML）](<./design/panel-flow-blue.html>)
 
-1. 把整个 `workfiles-assistant` 文件夹放到固定位置（例如 `~/Developer/workfiles-assistant`），不要放在下载文件夹。
-2. 双击 `1-构建语音组件.command` 构建桌面语音组件（每台机器各做一次；复用本机 `DeepSeek Harness.app` 的 Electron，产物在 `~/Library/Caches/DeepSeekHarness/WorkfilesVoice`，不进包）。
-3. 在 DSH 插件页「添加插件」选择该目录，启用后完全退出并重新打开 DSH；刷新后侧栏底部出现「资料助手」。首次使用在面板里添加自己的资料文件夹、由本人授权辅助功能；**⌘⇧Space** 唤起语音，按提示准备本地识别模型并允许麦克风。
+它不截图、不做 OCR、不读剪贴板、不读浏览器历史，也不接云端连接器；识别在本机完成。
 
-语音功能依赖 DSH 自带的语音识别（`@deepseek-ai/dsh-experimental-voice-input-bundle`，本机 SenseVoice）；宿主没装时先在插件页装上。
+## 它能做什么
 
-从源码目录安装时，先 `pnpm install` 再 `pnpm run build:native`，详见 `AGENT_INSTALL.md`。
+- **语音找回，不用记名字**：⌘⇧Space →「早上那份环润讯复盘」→ 列出候选 → 接着说「第二个」直接打开。只有歧义时才追问。
+- **7 天本地线索**：只记录你在面板里勾选的软件在前台出现过的时间；窗口标题 / HTTPS 地址要逐应用另外同意，默认关闭。
+- **按范围找文件**：只在你添加的资料文件夹里，按名称和正文找 PPT / Word / 表格 / PDF / 文本，按真实修改时间排序，不跟随符号链接逃逸。
+- **受控打开**：模型只能打开本次会话里已经出现过的候选（`wf-` / `wa-` ID），不能传任意路径或 URL；`revealInFinder` 只在访达中选中文件。
 
-已知限制（内测）：只在 macOS arm64 + DSH 0.2.2-rc.3 上验证；未接飞书/腾讯/MCP 连接器；不做 OCR/截屏；不同应用暴露的 Accessibility 元数据差异很大，取不到时只保留应用级线索。详见 [能力评估](<./MACOS_CAPABILITIES.md>) 与 [验收记录](<./VERIFICATION.md>)。
+## 安装
+
+**环境**：macOS arm64（Apple 芯片）+ DeepSeek Harness **0.2.2-rc.3**。Intel Mac 不支持；DSH 版本不一致时插件管理器会拒绝安装。
+
+语音需要 DSH 自带的语音识别（实验插件 `@deepseek-ai/dsh-experimental-voice-input-bundle`，本机 SenseVoice）；宿主没装时先在插件页装上。
+
+### 方式一：下载打包版（推荐）
+
+1. 到 [Releases](https://github.com/songshun1021/workfiles-assistant/releases/latest) 下载 `workfiles-assistant-<version>-macos-arm64.zip`，解压到固定位置，例如 `~/Developer/workfiles-assistant`。**不要放在下载文件夹**，装好后也不要移动（DSH 记录的是这个目录的绝对路径）。
+2. 双击 `1-构建语音组件.command`（每台机器一次，约 1～2 分钟）。被 Gatekeeper 拦住时：右键 → 打开。
+3. DSH → 设置 → 插件 → **添加插件**，选择这个文件夹；启用后**完全退出 DSH 再打开**（⌘Q）。
+4. 侧栏底部出现「资料助手」：在面板里添加资料文件夹、由本人授权辅助功能；按 **⌘⇧Space** 开始用。
+
+### 方式二：从源码（开发者）
+
+```sh
+git clone https://github.com/songshun1021/workfiles-assistant.git ~/Developer/workfiles-assistant
+cd ~/Developer/workfiles-assistant
+pnpm install
+pnpm run build:native   # 构建语音组件到 ~/Library/Caches/DeepSeekHarness/WorkfilesVoice
+```
+
+然后用同样的「添加插件」选择一个本地目录。
+
+> 也可以把仓库地址直接贴进「添加插件」由 DSH 以 Git 方式安装；但语音组件需要稳定的本地目录来构建，所以仍建议上面的本地目录方式。
+
+### 构建语音组件
+
+语音小窗复用本机已安装的 `DeepSeek Harness.app` 的 Electron 运行时，必须在**本机**构建：
+
+```sh
+pnpm run build:native    # 等价于 node native/build-helper.mjs --output-root "$HOME/Library/Caches/DeepSeekHarness/WorkfilesVoice"
+```
+
+产物在 `~/Library/Caches/DeepSeekHarness/WorkfilesVoice`（约 300 MB），不会启动 GUI、不会打开麦克风，也不修改或重签原 App。改动 `native/` 或 `voice-ui/` 后必须重新构建：小窗启动前会校验 11 个冻结资源的哈希，源码改了而组件没重建时会提示「语音界面源码已改变」。
+
+### 已知限制
+
+只在 macOS arm64 + DSH 0.2.2-rc.3 上验证；未接飞书/腾讯/MCP 连接器；不做 OCR/截屏；不同应用暴露的 Accessibility 元数据差异很大，取不到时只保留应用级线索。详见 [能力评估](<./MACOS_CAPABILITIES.md>) 与 [验收记录](<./VERIFICATION.md>)。
+
+## 隐私与权限
+
+- **默认什么都不记录**：新用户不选任何软件、记录关闭、窗口标题和网址许可为空；升级不扩大已有同意。
+- 基础线索只有应用名称 / 标识和前台观察时间；窗口标题和 HTTPS 地址是逐应用额外同意，读取有界、不读其它窗口或正文。
+- 不读按键、剪贴板、截图、音频、浏览器历史数据库；不用 System Events 做自动点击或输入；不申请或绕过系统权限，麦克风与辅助功能由你本人在系统设置里授予。
+- 账本滚动 7 天、最多 1000 条，只在本机；自动记录不调用模型 API。查询时相关线索会作为普通工具结果进入当前会话，按你的模型设置发送。
+- 完整边界见 [CAPABILITIES.md](CAPABILITIES.md)。
 
 ## 入口与日常使用
 
@@ -85,7 +134,7 @@ DeepSeek Harness 的 macOS 插件：**一次显式快捷键 → 说话 → 处�
 
 ## 实现、构建与验证边界
 
-当前 **0.4.0／DSH 0.2.2-rc.3／macOS arm64**。公开 Cordis／Typert／StorageDomain 接口；不增加 HTTP 服务、不修改或重签原 App。旧 `local_workfiles_activity` v1 数据用向后兼容解码器读取，不重置旧数据，新窗口许可补为空。
+当前 **0.9.0／DSH 0.2.2-rc.3／macOS arm64**。公开 Cordis／Typert／StorageDomain 接口；不增加 HTTP 服务、不修改或重签原 App。旧 `local_workfiles_activity` v1 数据用向后兼容解码器读取，不重置旧数据，新窗口许可补为空。
 
 原生采集具有节点／深度／时间／输出／进程退出预算；不会失败后退回全树或 OCR。语音小窗自有 Electron 组件保留宿主／副本／11 个冻结资源哈希校验；只有相关资源或宿主变动才需要在批准缓存中重建，不通过版本豁免绕过。原 App 不改／不重签。
 
@@ -116,3 +165,19 @@ pnpm run build:native     # 构建桌面语音组件到 ~/Library/Caches/DeepSee
 ```
 
 **改动 `voice-ui/` 或 `native/` 之后必须重新 `pnpm run build:native`。** 小窗启动前会校验 11 个冻结资源的哈希：源码改了而组件没重建时，快捷键会静默失效并提示「语音界面源码已改变」——这是刻意的闸门，不是故障。
+
+
+## English
+
+Workfiles Assistant is a macOS arm64 plugin for DeepSeek Harness 0.2.2-rc.3. Press ⌘⇧Space, say what you remember, and it finds the document or page you saw recently — then opens it only through IDs already seen in the conversation.
+
+- A local 7-day ledger of the apps you choose (off by default); window titles and normalized HTTPS addresses need separate per-app consent.
+- Scoped document search inside the folders you add — names and bounded body matching, real modification times, no symlink escape.
+- Five model-facing tools (`workfiles_search`, `workfiles_inspect`, `workfiles_open`, `workfiles_context`, `workfiles_history`); no arbitrary paths or URLs.
+- No screenshots, OCR, clipboard, keystrokes, browser-history database, or cloud connectors; recognition runs on-device with SenseVoice.
+
+Install: download the release zip, run `1-构建语音组件.command` once, then add the folder in DeepSeek Harness → Settings → Plugins. From source: `pnpm install && pnpm run build:native`. See the Chinese sections above for the full contract.
+
+## License
+
+[MIT](LICENSE) © Work documents assistant contributors

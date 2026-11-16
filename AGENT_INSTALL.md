@@ -1,7 +1,7 @@
 # Agent 安装手册 · 工作资料助手 0.9.0
 
 > 面向接收方 Agent（Codex / DeepSeek Harness 等）。请**按顺序执行并在每一步后核对输出**；不确定时停下来问人类，不要猜。
-> 人类用户请看 `README.md` 的「内测安装」。
+> 人类用户请看 `README.md` 的「安装」。
 
 ## 0. 环境自检（不通过就停止）
 
@@ -76,12 +76,9 @@ node --test test/*.test.js      # 期望：tests 624 / pass 624 / fail 0
 2. 让人类刷新 Harness 页面；左下角应出现「资料助手」入口。
 3. 只读验证（不产生采集）：让 Agent 调用 `workfiles_history`，参数 `{ "detail": "applications", "limit": 1 }`，应返回 `ok: true` 且 `recordingEnabled`、`selectedApplications` 字段存在。
 
-### 5.5 必须修正默认资料文件夹（换机器后必做）
+### 5.5 添加资料文件夹（换机器后必做）
 
-`cordis.patch.yml` 里的默认文件夹是**开发机路径**（`/Users/sean/Desktop` 等），在别的 Mac 上不存在。启用后让人类在面板「资料文件夹」里：
-
-- 移除不存在的那几条（会显示 warning），
-- 添加这台机器真实要用的文件夹（例如自己的 `~/Desktop`、`~/Documents`）。
+插件默认**不带任何资料文件夹**（`cordis.patch.yml` 里 `roots` 为空），避免把上一台机器的路径带过来。启用后让人类在面板「资料文件夹」里添加这台机器真实要用的文件夹（例如自己的 `~/Desktop`、`~/Documents`）。
 
 不要为了绕过警告而把根目录设成 `/` 或整个个人目录；本版只接受具体文件夹。
 
